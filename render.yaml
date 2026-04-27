@@ -1,0 +1,8 @@
+services:
+  - type: web_service
+    name: yalla-transfer-backend
+    env: node
+    root: backend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start:prod
+    autoDeploy: true
