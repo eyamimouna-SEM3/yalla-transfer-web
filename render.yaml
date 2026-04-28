@@ -8,11 +8,10 @@ services:
     name: yalla-transfer-backend
     runtime: node
     plan: starter
-    rootDir: backend
     branch: main
-    buildCommand: npm install && npm run build
-    preDeployCommand: npx prisma db push
-    startCommand: npm run start:prod
+    buildCommand: cd backend && npm install && npm run build
+    preDeployCommand: cd backend && npx prisma db push
+    startCommand: cd backend && npm run start:prod
     envVars:
       - key: DATABASE_URL
         fromDatabase:
