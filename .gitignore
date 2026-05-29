@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Environment files (Vercel injects them, never commit)
+.env
+.env.production
+.env.development
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
