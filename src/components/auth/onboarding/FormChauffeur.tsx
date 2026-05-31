@@ -2,10 +2,28 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, ArrowRight, Car, CheckCircle2, Upload, Camera, User, Clock, ShieldCheck } from "lucide-react";
+import { ArrowLeft, ArrowRight, Car, CheckCircle2, Upload, Camera, User, Clock, ShieldCheck, Loader2 } from "lucide-react";
 import { authService } from "@/services/authService";
+import { uploadService } from "@/services/uploadService";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+
+/**
+ * Téléverse le fichier choisi et retourne l'URL persistée par le backend.
+ * Affiche un toast d'erreur en cas d'échec et retourne null.
+ */
+const persistFile = async (file: File | undefined | null): Promise<string | null> => {
+  if (!file) return null;
+  try {
+    const res = await uploadService.uploadUserDocument(file);
+    return res.url;
+  } catch (err) {
+    const e = err as { message?: string };
+    toast.error(e.message || "Téléversement du document impossible.");
+    return null;
+  }
+};
 
 interface Props {
   name: string;
@@ -29,39 +47,79 @@ const FieldLabel = ({ children, required }: { children: React.ReactNode; require
   </label>
 );
 
-const UploadField = ({ label, required, hint, value, onChange }: { label: string; required?: boolean; hint?: string; value?: string; onChange?: (file: string) => void }) => {
+/**
+ * Champ d'upload générique : téléverse le fichier sur le backend dès sélection
+ * et stocke l'URL retournée (qui sera envoyée dans le payload register).
+ * `value` contient l'URL serveur (jamais juste le nom local).
+ */
+const UploadField = ({ label, required, hint, value, onChange }: { label: string; required?: boolean; hint?: string; value?: string; onChange?: (url: string) => void }) => {
+  const [busy, setBusy] = useState(false);
+  const handle = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    const url = await persistFile(file);
+    setBusy(false);
+    if (url) onChange?.(url);
+  };
   return (
     <div>
       <FieldLabel required={required}>{label}</FieldLabel>
       {hint && <p className="text-xs text-muted-foreground mb-1.5">{hint}</p>}
       <label className={`flex items-center gap-3 h-12 px-4 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${value ? "border-primary bg-secondary" : "border-border hover:border-primary hover:bg-primary/5"}`}>
-        <input type="file" accept=".pdf,.jpg,.png" className="hidden" onChange={(e) => onChange?.(e.target.files?.[0]?.name || "")} />
-        {value ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
+        <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" className="hidden" onChange={handle} disabled={busy} />
+        {busy ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
+          : value ? <CheckCircle2 className="h-4 w-4 text-primary" />
+          : <Upload className="h-4 w-4 text-muted-foreground" />}
         <span className={`text-sm truncate ${value ? "text-primary font-medium" : "text-muted-foreground"}`}>
-          {value || "Cliquer pour uploader (PDF, JPG, PNG)"}
+          {busy ? "Téléversement en cours…"
+            : value ? "Document téléversé ✔"
+            : "Cliquer pour uploader (PDF, JPG, PNG)"}
         </span>
       </label>
     </div>
   );
 };
 
-const RectoVersoUpload = ({ label, required, rectoValue, versoValue, onRectoChange, onVersoChange }: { label: string; required?: boolean; rectoValue?: string; versoValue?: string; onRectoChange?: (file: string) => void; onVersoChange?: (file: string) => void }) => {
+const RectoVersoUpload = ({ label, required, rectoValue, versoValue, onRectoChange, onVersoChange }: { label: string; required?: boolean; rectoValue?: string; versoValue?: string; onRectoChange?: (url: string) => void; onVersoChange?: (url: string) => void }) => {
+  const [busyR, setBusyR] = useState(false);
+  const [busyV, setBusyV] = useState(false);
+  const handleR = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusyR(true);
+    const url = await persistFile(file);
+    setBusyR(false);
+    if (url) onRectoChange?.(url);
+  };
+  const handleV = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusyV(true);
+    const url = await persistFile(file);
+    setBusyV(false);
+    if (url) onVersoChange?.(url);
+  };
   return (
     <div>
       <FieldLabel required={required}>{label}</FieldLabel>
       <div className="grid grid-cols-2 gap-3 mt-1.5">
         <label className={`flex items-center gap-2 h-12 px-4 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${rectoValue ? "border-primary bg-secondary" : "border-border hover:border-primary hover:bg-primary/5"}`}>
-          <input type="file" accept=".jpg,.png,.pdf" className="hidden" onChange={(e) => onRectoChange?.(e.target.files?.[0]?.name || "")} />
-          {rectoValue ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
+          <input type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden" onChange={handleR} disabled={busyR} />
+          {busyR ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            : rectoValue ? <CheckCircle2 className="h-4 w-4 text-primary" />
+            : <Upload className="h-4 w-4 text-muted-foreground" />}
           <span className={`text-sm truncate ${rectoValue ? "text-primary font-medium" : "text-muted-foreground"}`}>
-            {rectoValue ? "Recto ✔" : "📄 Recto"}
+            {busyR ? "Envoi…" : rectoValue ? "Recto ✔" : "📄 Recto"}
           </span>
         </label>
         <label className={`flex items-center gap-2 h-12 px-4 rounded-xl border-2 border-dashed cursor-pointer transition-colors ${versoValue ? "border-primary bg-secondary" : "border-border hover:border-primary hover:bg-primary/5"}`}>
-          <input type="file" accept=".jpg,.png,.pdf" className="hidden" onChange={(e) => onVersoChange?.(e.target.files?.[0]?.name || "")} />
-          {versoValue ? <CheckCircle2 className="h-4 w-4 text-primary" /> : <Upload className="h-4 w-4 text-muted-foreground" />}
+          <input type="file" accept=".jpg,.jpeg,.png,.pdf" className="hidden" onChange={handleV} disabled={busyV} />
+          {busyV ? <Loader2 className="h-4 w-4 animate-spin text-primary" />
+            : versoValue ? <CheckCircle2 className="h-4 w-4 text-primary" />
+            : <Upload className="h-4 w-4 text-muted-foreground" />}
           <span className={`text-sm truncate ${versoValue ? "text-primary font-medium" : "text-muted-foreground"}`}>
-            {versoValue ? "Verso ✔" : "📄 Verso"}
+            {busyV ? "Envoi…" : versoValue ? "Verso ✔" : "📄 Verso"}
           </span>
         </label>
       </div>
@@ -69,12 +127,25 @@ const RectoVersoUpload = ({ label, required, rectoValue, versoValue, onRectoChan
   );
 };
 
-const VehiclePhotoField = ({ label, value, onChange }: { label: string; value?: string; onChange?: (file: string) => void }) => {
+const VehiclePhotoField = ({ label, value, onChange }: { label: string; value?: string; onChange?: (url: string) => void }) => {
+  const [busy, setBusy] = useState(false);
+  const handle = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    const url = await persistFile(file);
+    setBusy(false);
+    if (url) onChange?.(url);
+  };
   return (
     <label className={`flex flex-col items-center justify-center gap-2 h-28 rounded-xl border-2 border-dashed cursor-pointer transition-colors text-center ${value ? "border-primary bg-secondary" : "border-border hover:border-primary hover:bg-primary/5"}`}>
-      <input type="file" accept=".jpg,.png,.webp" className="hidden" onChange={(e) => onChange?.(e.target.files?.[0]?.name || "")} />
-      {value ? <CheckCircle2 className="h-6 w-6 text-primary" /> : <Camera className="h-6 w-6 text-muted-foreground" />}
-      <span className={`text-xs font-medium ${value ? "text-primary" : "text-muted-foreground"}`}>{value ? "Photo ajoutée ✔" : label}</span>
+      <input type="file" accept=".jpg,.jpeg,.png,.webp" className="hidden" onChange={handle} disabled={busy} />
+      {busy ? <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        : value ? <CheckCircle2 className="h-6 w-6 text-primary" />
+        : <Camera className="h-6 w-6 text-muted-foreground" />}
+      <span className={`text-xs font-medium ${value ? "text-primary" : "text-muted-foreground"}`}>
+        {busy ? "Envoi…" : value ? "Photo ajoutée ✔" : label}
+      </span>
     </label>
   );
 };
@@ -83,6 +154,7 @@ const steps = ["Le Chauffeur", "Le Véhicule", "Conformité Légale"];
 
 const FormChauffeur = ({ name, email, password, onBack }: Props) => {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [step, setStep] = useState(0);
   const [selectedLangs, setSelectedLangs] = useState<string[]>([]);
   const [h24, setH24] = useState("");
@@ -198,6 +270,7 @@ const FormChauffeur = ({ name, email, password, onBack }: Props) => {
         vehiclePhotoBack: vehiclePhotoBack || undefined,
         vehiclePhotoInterior: vehiclePhotoInterior || undefined,
       });
+      await refresh();
       setSuccess(true);
     } catch (error: any) {
       console.error("Registration error:", error);

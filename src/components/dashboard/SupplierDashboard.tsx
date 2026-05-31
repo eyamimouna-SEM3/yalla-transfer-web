@@ -9,35 +9,63 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import {
   CalendarDays, Inbox, Car, Users, DollarSign, Star, BarChart3,
   TrendingUp, Bell, Clock, CheckCircle2, XCircle, Wrench, UserCheck,
   UserX, FileText, MessageSquare, ListChecks, Check, X, ExternalLink, AlertCircle,
+  MapPin, Phone, Mail, Baby, Accessibility, Luggage, Repeat, CreditCard, Hash,
+  Bus, Loader2, UserPlus,
 } from "lucide-react";
+import type { SupplierFleetDriver } from "@/services/supplierService";
 import VehicleManagement from "@/components/dashboard/supplier/VehicleManagement";
 import DriverManagement from "@/components/dashboard/supplier/DriverManagement";
 import type { Booking } from "@/services/bookingService";
 import { offersService } from "@/services/offersService";
 import { driverService } from "@/services/driverService";
+import { supplierService } from "@/services/supplierService";
 import { notificationService, type UserNotification } from "@/services/notificationService";
 import { ratingService, type RatingAggregate } from "@/services/ratingService";
 import { useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
+import { SettingsContent } from "@/pages/DashboardPage";
 
-const chauffeurNav: NavItem[] = [
-  { icon: ListChecks, label: "Liste des réservations", id: "requests", badge: 2 },
+// Configuration de navigation : les badges sont remplis dynamiquement au
+// runtime à partir du nombre réel de réservations disponibles et de notifs
+// non lues — voir buildNavItems() plus bas.
+const chauffeurNavBase: NavItem[] = [
+  { icon: ListChecks, label: "Liste des réservations", id: "requests" },
   { icon: DollarSign, label: "Revenus", id: "revenue" },
   { icon: Star, label: "Évaluations", id: "ratings" },
-  { icon: Bell, label: "Notifications", id: "notifications", badge: 3 },
+  { icon: Bell, label: "Notifications", id: "notifications" },
 ];
 
-const transportNav: NavItem[] = [
-  { icon: ListChecks, label: "Liste des réservations", id: "requests", badge: 2 },
+const transportNavBase: NavItem[] = [
+  { icon: ListChecks, label: "Liste des réservations", id: "requests" },
   { icon: Car, label: "Gestion des véhicules", id: "vehicles" },
   { icon: Users, label: "Gestion des chauffeurs", id: "drivers" },
   { icon: DollarSign, label: "Revenus & statistiques", id: "revenue" },
   { icon: Star, label: "Qualité & avis", id: "ratings" },
-  { icon: Bell, label: "Notifications", id: "notifications", badge: 3 },
+  { icon: Bell, label: "Notifications", id: "notifications" },
 ];
+
+const buildNavItems = (
+  profile: "chauffeur" | "transport",
+  requestsCount: number,
+  unreadCount: number,
+): NavItem[] => {
+  const base = profile === "chauffeur" ? chauffeurNavBase : transportNavBase;
+  return base.map((item) => {
+    if (item.id === "requests" && requestsCount > 0) {
+      return { ...item, badge: requestsCount };
+    }
+    if (item.id === "notifications" && unreadCount > 0) {
+      return { ...item, badge: unreadCount };
+    }
+    return item;
+  });
+};
 
 interface Props {
   profile: "chauffeur" | "transport";
@@ -80,44 +108,123 @@ const mockNotifications = [
 
 // ============== COMPONENT ==============
 const SupplierDashboard = ({ profile, userName, bookings = [], userRole = "", userId = "", onRefresh }: Props) => {
-  const navItems = profile === "chauffeur" ? chauffeurNav : transportNav;
   const [activeItem, setActiveItem] = useState("requests");
+  // Compteur de notifications non lues — alimenté par le NotificationsSection
+  // qui charge ses propres données via notificationService.listMine().
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+
+  // Récupère le nombre de notifications non lues au chargement du dashboard
+  // et après chaque changement d'onglet (au cas où l'utilisateur a marqué
+  // des notifs comme lues entre temps).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await notificationService.listMine();
+        if (!cancelled) {
+          setUnreadNotifications(list.filter((n) => !n.read).length);
+        }
+      } catch {
+        // silencieux — pas critique pour l'affichage
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeItem]);
 
   // Mapper les bookings réels pour l'affichage. Inclut maintenant pending ET confirmed
   // (confirmed sans driver = encore prenable). Voir DashboardPage qui charge les bonnes données.
+  // Sérialise un booking backend en RequestRow enrichie consommée par
+  // RequestsSection (utilisé à la fois par les sociétés de transport et
+  // les chauffeurs indépendants).
+  const toRequestRow = (b: Booking, status: string): RequestRow => ({
+    id: b.id,
+    code: b.code,
+    client: b.passengerName?.trim() || "Client",
+    from: b.departure,
+    to: b.destination,
+    date: new Date(b.departureAt).toISOString().slice(0, 10),
+    time: new Date(b.departureAt).toISOString().slice(11, 16),
+    vehicle: b.vehicles?.[0]?.vehicle?.type ?? "",
+    vehicleCategory: b.vehicles?.[0]?.vehicle?.category ?? b.vehicles?.[0]?.vehicleId,
+    price: `${b.totalPrice} TND`,
+    status,
+    passengerName: b.passengerName,
+    passengerEmail: b.passengerEmail,
+    passengerPhone: b.passengerPhone,
+    passengers: b.passengers,
+    largeLuggage: b.largeLuggage,
+    smallLuggage: b.smallLuggage,
+    babySeat: b.babySeat,
+    pmr: b.pmr,
+    roundTrip: b.roundTrip,
+    returnAt: b.returnAt,
+    notes: b.notes,
+    paymentStatus: b.payment?.status,
+    paymentMethod: b.payment?.method,
+    createdAt: b.createdAt,
+    assignedDriverId: b.assignedDriverId,
+  });
+
+  // Sépare les bookings en deux paniers indépendants :
+  //
+  // - "Nouvelles demandes" (onglet Réservations) = pool disponible
+  //   à l'acceptation. On exclut explicitement les courses déjà prises
+  //   par CE supplier (handledBySupplierId === userId) : sinon la carte
+  //   restait visible après le clic Accepter et le bouton ne semblait pas
+  //   réagir.
+  //
+  // - "Courses acceptées" (onglet Courses acceptées) = bookings que le
+  //   supplier a explicitement acceptés (handledBySupplierId === userId).
+  //   Cela ne dépend plus du statut tant que la course est encore active.
+  const isInActivePool = (b: Booking) =>
+    !b.handledBySupplierId &&
+    !b.assignedDriverId &&
+    (b.status === "pending" || b.status === "confirmed");
+
+  // "À moi" : pour un supplier on regarde handledBySupplierId, pour un
+  // chauffeur (indépendant ou employé) on regarde assignedDriverId.
+  const driverRole = userRole === "driver_independent" || userRole === "driver_employee";
+  const isMine = (b: Booking) => {
+    if (!userId) return false;
+    if (driverRole) return b.assignedDriverId === userId;
+    return b.handledBySupplierId === userId;
+  };
+
+  // Tous les statuts qui apparaissent dans l'onglet "Courses acceptées"
+  // (du moment où le supplier les accepte jusqu'à leur fin). On inclut
+  // désormais "completed" et "cancelled" pour que la trace de la course
+  // reste visible une fois terminée — un sous-filtre permet de basculer
+  // entre actives / terminées.
+  const isVisibleStatus = (s: string) =>
+    s === "confirmed" ||
+    s === "assigned" ||
+    s === "driver_en_route" ||
+    s === "arrived" ||
+    s === "in_progress" ||
+    s === "completed" ||
+    s === "cancelled";
+
   const newRequests = bookings
-    .filter(b => (b.status === "pending" || b.status === "confirmed") && !b.assignedDriverId)
-    .map(b => ({
-      id: b.id,
-      client: "Client",
-      from: b.departure,
-      to: b.destination,
-      date: new Date(b.departureAt).toISOString().slice(0, 10),
-      time: new Date(b.departureAt).toISOString().slice(11, 16),
-      vehicle: b.vehicles?.[0]?.vehicle?.type ?? "",
-      price: `${b.totalPrice} TND`,
-      status: "new" as const,
-    }));
+    .filter(isInActivePool)
+    .map(b => toRequestRow(b, "new"));
 
   const acceptedCourses = bookings
-    .filter(b => b.status === "confirmed" || b.status === "assigned" || b.status === "driver_en_route" || b.status === "in_progress")
-    .map(b => ({
-      id: b.id,
-      client: "Client",
-      from: b.departure,
-      to: b.destination,
-      date: new Date(b.departureAt).toISOString().slice(0, 10),
-      time: new Date(b.departureAt).toISOString().slice(11, 16),
-      vehicle: b.vehicles?.[0]?.vehicle?.type ?? "",
-      price: `${b.totalPrice} TND`,
-      status: b.status as "in_progress" | "completed" | "cancelled",
-    }));
+    .filter(b => isMine(b) && isVisibleStatus(b.status))
+    .map(b => toRequestRow(b, b.status));
 
   // Utiliser les données réelles dès que l'utilisateur est authentifié (userRole défini),
   // même si la liste est vide. Le mock data est uniquement pour l'aperçu non connecté.
   const isAuthenticated = Boolean(userRole);
   const displayRequests = isAuthenticated ? newRequests : mockNewRequests;
   const displayCourses = isAuthenticated ? acceptedCourses : mockAcceptedCourses;
+
+  // Calcul dynamique des badges de la sidebar : on affiche le vrai compte
+  // de réservations disponibles et de notifications non lues.
+  const navItems = buildNavItems(
+    profile,
+    isAuthenticated ? newRequests.length : 0,
+    isAuthenticated ? unreadNotifications : 0,
+  );
 
   return (
     <DashboardLayout
@@ -126,6 +233,7 @@ const SupplierDashboard = ({ profile, userName, bookings = [], userRole = "", us
       navItems={navItems}
       activeItem={activeItem}
       onNavChange={setActiveItem}
+      unreadNotifications={isAuthenticated ? unreadNotifications : 0}
     >
       <div className="mb-8">
         <h1 className="font-display text-2xl lg:text-3xl font-bold text-foreground">
@@ -142,12 +250,7 @@ const SupplierDashboard = ({ profile, userName, bookings = [], userRole = "", us
       {activeItem === "revenue" && <RevenueSection bookings={bookings} isAuthenticated={isAuthenticated} />}
       {activeItem === "ratings" && <RatingsSection userId={userId} userRole={userRole} isAuthenticated={isAuthenticated} />}
       {activeItem === "notifications" && <NotificationsSection onNav={setActiveItem} isAuthenticated={isAuthenticated} />}
-      {activeItem === "settings" && (
-        <div className="bg-card rounded-2xl border border-border p-8">
-          <h2 className="font-display text-xl font-bold text-foreground mb-2">⚙ Paramètres du compte</h2>
-          <p className="text-muted-foreground">Les paramètres seront disponibles prochainement.</p>
-        </div>
-      )}
+      {activeItem === "settings" && <SettingsContent />}
     </DashboardLayout>
   );
 };
@@ -261,14 +364,36 @@ const statusBadge = (status: string) => {
 
 interface RequestRow {
   id: string;
+  code?: string;
   client: string;
   from: string;
   to: string;
   date: string;
   time: string;
   vehicle: string;
+  /** Catégorie brute du véhicule (eco/sedan/van/minibus/bus/...) — utilisée
+   *  pour filtrer les chauffeurs par catégorie de permis lors de l'assignation. */
+  vehicleCategory?: string;
   price: string;
   status: string;
+  // Infos supplémentaires affichées dans la liste de cartes pour aider la
+  // société/le chauffeur indépendant à décider d'accepter ou non.
+  passengerName?: string;
+  passengerEmail?: string;
+  passengerPhone?: string;
+  passengers?: number;
+  largeLuggage?: number;
+  smallLuggage?: number;
+  babySeat?: boolean;
+  pmr?: boolean;
+  roundTrip?: boolean;
+  returnAt?: string | null;
+  notes?: string;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  createdAt?: string;
+  /** Identifiant du chauffeur affecté (null si pas encore assigné). */
+  assignedDriverId?: string | null;
 }
 
 const submitOffer = async (bookingId: string, priceStr: string, onDone?: () => void) => {
@@ -288,6 +413,57 @@ const submitOffer = async (bookingId: string, priceStr: string, onDone?: () => v
       description: err.status === 409
         ? "Vous avez déjà fait une offre sur cette réservation."
         : err.message ?? "Réessaie dans un instant.",
+      variant: "destructive",
+    });
+  }
+};
+
+// Le fournisseur (société) accepte directement une nouvelle réservation client.
+// La réservation passe de "pending" à "confirmed" et lui est rattachée.
+// Il pourra ensuite assigner un de ses chauffeurs.
+const acceptAsSupplier = async (bookingId: string, onDone?: () => void) => {
+  try {
+    await supplierService.acceptBooking(bookingId);
+    toast({
+      title: "Réservation acceptée",
+      description: "La réservation vous est désormais affectée. Vous pouvez maintenant lui assigner un chauffeur.",
+    });
+    onDone?.();
+  } catch (e) {
+    const err = e as { message?: string; status?: number };
+    toast({
+      title: "Acceptation impossible",
+      description: err.status === 400
+        ? err.message ?? "Cette réservation a déjà été acceptée par un autre fournisseur."
+        : err.message ?? "Réessaie dans un instant.",
+      variant: "destructive",
+    });
+  }
+};
+
+/**
+ * Le supplier assigne un de ses chauffeurs à une course acceptée.
+ * - Backend : POST /supplier/bookings/:id/assign-driver
+ * - Le booking passe en statut `assigned`, le chauffeur est notifié.
+ */
+const assignDriverToBooking = async (
+  bookingId: string,
+  driverId: string,
+  driverName: string,
+  onDone?: () => void,
+) => {
+  try {
+    await supplierService.assignDriver(bookingId, driverId);
+    toast({
+      title: "Chauffeur assigné",
+      description: `${driverName} a été affecté à cette course.`,
+    });
+    onDone?.();
+  } catch (e) {
+    const err = e as { message?: string; status?: number };
+    toast({
+      title: "Assignation impossible",
+      description: err.message ?? "Réessaie dans un instant.",
       variant: "destructive",
     });
   }
@@ -319,6 +495,525 @@ const passAsDriver = async (bookingId: string, onDone?: () => void) => {
   }
 };
 
+/**
+ * Carte détaillée d'une demande de réservation, affichée dans la "Liste
+ * des réservations". Présente toutes les informations utiles que le client
+ * a renseignées (passager, trajet, options, paiement) et propose au
+ * supplier d'accepter la course, ou au chauffeur indépendant d'accepter
+ * ou refuser.
+ */
+const RequestCard = ({
+  r, isDriver, useRealData, onRefresh,
+}: {
+  r: RequestRow;
+  isDriver: boolean;
+  useRealData: boolean;
+  onRefresh?: () => void;
+}) => {
+  // Format relatif "il y a X min/h/j" pour l'horodatage de création.
+  const ago = (() => {
+    if (!r.createdAt) return null;
+    const ms = Date.now() - new Date(r.createdAt).getTime();
+    const min = Math.max(0, Math.round(ms / 60000));
+    if (min < 1) return "à l'instant";
+    if (min < 60) return `il y a ${min} min`;
+    const h = Math.round(min / 60);
+    if (h < 24) return `il y a ${h} h`;
+    const d = Math.round(h / 24);
+    return `il y a ${d} j`;
+  })();
+
+  const displayCode = r.code || `#${r.id.slice(0, 8)}`;
+  const luggageTotal = (r.largeLuggage ?? 0) + (r.smallLuggage ?? 0);
+
+  return (
+    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden hover:border-primary/30 transition-colors">
+      {/* En-tête : référence + statut + ancienneté */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+        <div className="flex items-center gap-2 text-xs">
+          <Hash className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="font-mono font-semibold text-foreground">{displayCode}</span>
+          {ago && (
+            <span className="text-muted-foreground inline-flex items-center gap-1">
+              <Clock className="h-3 w-3" /> {ago}
+            </span>
+          )}
+        </div>
+        {statusBadge(r.status)}
+      </div>
+
+      {/* Corps : grille 2 colonnes (trajet + passager) */}
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Bloc trajet */}
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wide">
+            Trajet demandé
+          </p>
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="font-medium text-foreground truncate">{r.from}</p>
+              <p className="text-xs text-muted-foreground">Départ</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="h-4 w-4 text-accent flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="font-medium text-foreground truncate">{r.to}</p>
+              <p className="text-xs text-muted-foreground">Arrivée</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1">
+            <span className="inline-flex items-center gap-1">
+              <CalendarDays className="h-3.5 w-3.5" /> {r.date}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5" /> {r.time}
+            </span>
+            {r.roundTrip && (
+              <span className="inline-flex items-center gap-1 text-primary">
+                <Repeat className="h-3.5 w-3.5" /> Aller-retour
+              </span>
+            )}
+          </div>
+          {r.roundTrip && r.returnAt && (
+            <p className="text-xs text-muted-foreground pl-5">
+              Retour : {new Date(r.returnAt).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })}
+            </p>
+          )}
+        </div>
+
+        {/* Bloc passager + contact */}
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wide">
+            Client
+          </p>
+          <div className="flex items-center gap-2 text-sm">
+            <UserCheck className="h-4 w-4 text-primary flex-shrink-0" />
+            <p className="font-semibold text-foreground truncate">
+              {r.passengerName?.trim() || r.client || "Client"}
+            </p>
+          </div>
+          {r.passengerPhone && (
+            <a href={`tel:${r.passengerPhone}`} className="flex items-center gap-2 text-sm text-foreground hover:text-primary transition-colors">
+              <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="font-mono">{r.passengerPhone}</span>
+            </a>
+          )}
+          {r.passengerEmail && (
+            <a href={`mailto:${r.passengerEmail}`} className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors min-w-0">
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate">{r.passengerEmail}</span>
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Bandeau besoins (passagers, bagages, options, véhicule) */}
+      <div className="px-4 pb-3 flex flex-wrap gap-2">
+        <Badge variant="outline" className="text-[11px] gap-1">
+          <Users className="h-3 w-3" /> {r.passengers ?? "?"} passager{(r.passengers ?? 0) > 1 ? "s" : ""}
+        </Badge>
+        {luggageTotal > 0 && (
+          <Badge variant="outline" className="text-[11px] gap-1">
+            <Luggage className="h-3 w-3" /> {luggageTotal} bagage{luggageTotal > 1 ? "s" : ""}
+            {(r.largeLuggage ?? 0) > 0 && (r.smallLuggage ?? 0) > 0 && (
+              <span className="text-muted-foreground">({r.largeLuggage}G+{r.smallLuggage}P)</span>
+            )}
+          </Badge>
+        )}
+        {r.babySeat && (
+          <Badge variant="outline" className="text-[11px] gap-1 bg-accent/10 border-accent/30 text-accent">
+            <Baby className="h-3 w-3" /> Siège bébé
+          </Badge>
+        )}
+        {r.pmr && (
+          <Badge variant="outline" className="text-[11px] gap-1 bg-primary/10 border-primary/30 text-primary">
+            <Accessibility className="h-3 w-3" /> PMR
+          </Badge>
+        )}
+        {r.vehicle && (
+          <Badge variant="secondary" className="text-[11px] gap-1">
+            <Car className="h-3 w-3" /> {r.vehicle}
+          </Badge>
+        )}
+        {r.paymentStatus && (
+          <Badge
+            variant="outline"
+            className={`text-[11px] gap-1 ${
+              r.paymentStatus === "paid"
+                ? "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400"
+                : "bg-muted text-muted-foreground"
+            }`}
+          >
+            <CreditCard className="h-3 w-3" />
+            {r.paymentStatus === "paid" ? "Payé" : "Paiement en attente"}
+            {r.paymentMethod && ` · ${r.paymentMethod}`}
+          </Badge>
+        )}
+      </div>
+
+      {/* Pied : prix + actions */}
+      <div className="px-4 py-3 border-t border-border bg-muted/20 flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Montant proposé</p>
+          <p className="font-display text-lg font-bold text-primary">{r.price}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {!useRealData ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-xs gap-1"
+              onClick={() => toast({ title: "Démo", description: "Connectez-vous pour interagir avec une vraie réservation." })}
+            >
+              <Check className="h-3 w-3" /> Aperçu
+            </Button>
+          ) : isDriver ? (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs gap-1"
+                onClick={() => passAsDriver(r.id, onRefresh)}
+              >
+                <X className="h-3 w-3" /> Refuser
+              </Button>
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+                onClick={() => acceptAsDriver(r.id, onRefresh)}
+              >
+                <Check className="h-3 w-3" /> Accepter la course
+              </Button>
+            </>
+          ) : (
+            // Société de transport : un seul bouton "Accepter" qui passe la
+            // réservation en "confirmed" et la lui attribue (elle pourra
+            // ensuite assigner un de ses chauffeurs).
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={() => acceptAsSupplier(r.id, onRefresh)}
+            >
+              <Check className="h-3 w-3" /> Accepter la réservation
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Détermine quelle catégorie de permis de conduire est nécessaire pour
+ * conduire le véhicule demandé par la course. Minibus et bus exigent le
+ * permis D ; tous les autres véhicules légers se contentent du permis B.
+ *
+ * Les chauffeurs sans `vehicleType` valide en base sont considérés comme
+ * permis B par défaut (cas le plus fréquent).
+ */
+const requiredLicenseFor = (vehicleCategory: string | undefined): "license_b" | "license_d" => {
+  const cat = (vehicleCategory ?? "").toLowerCase().trim();
+  if (cat === "minibus" || cat === "bus" || cat === "autocar") return "license_d";
+  return "license_b";
+};
+
+const normalizeDriverLicense = (raw: string | null | undefined): "license_b" | "license_d" => {
+  if (!raw) return "license_b";
+  const v = raw.trim().toLowerCase();
+  if (v === "license_d" || v === "d" || v === "bus" || v === "minibus") return "license_d";
+  return "license_b";
+};
+
+/**
+ * Dialog permettant au supplier de choisir un chauffeur disponible parmi
+ * son équipe pour l'affecter à la course. Filtre automatiquement les
+ * chauffeurs incompatibles avec la catégorie de permis requise. Affiche
+ * un avertissement clair si aucun chauffeur compatible n'est trouvé.
+ */
+const AssignDriverDialog = ({
+  open, onOpenChange, course, onAssigned,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  course: RequestRow | null;
+  onAssigned?: () => void;
+}) => {
+  const [drivers, setDrivers] = useState<SupplierFleetDriver[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setSelected(null);
+    setLoading(true);
+    supplierService.fleetDrivers()
+      .then((data) => setDrivers(data))
+      .catch(() => setDrivers([]))
+      .finally(() => setLoading(false));
+  }, [open]);
+
+  const requiredLicense = requiredLicenseFor(course?.vehicleCategory);
+  const eligibleDrivers = drivers.filter((d) => {
+    const licenseOk = normalizeDriverLicense(d.vehicleType) === requiredLicense;
+    const activeOk = d.accountStatus !== "suspended";
+    const validatedOk = d.driverValidated !== false;
+    return licenseOk && activeOk && validatedOk;
+  });
+
+  const handleConfirm = async () => {
+    if (!selected || !course) return;
+    const driver = drivers.find((d) => d.id === selected);
+    if (!driver) return;
+    setSubmitting(true);
+    try {
+      await assignDriverToBooking(course.id, driver.id, driver.fullName, onAssigned);
+      onOpenChange(false);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus className="h-5 w-5 text-primary" />
+            Assigner un chauffeur
+          </DialogTitle>
+          <DialogDescription>
+            Course <span className="font-mono">{course?.code || course?.id.slice(0, 8)}</span> · {course?.from} → {course?.to}
+            <br />
+            <span className="text-xs">
+              Permis requis :{" "}
+              {requiredLicense === "license_d" ? (
+                <span className="inline-flex items-center gap-1 font-semibold text-accent">
+                  <Bus className="h-3 w-3" /> Permis D (minibus / bus)
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 font-semibold text-primary">
+                  <Car className="h-3 w-3" /> Permis B (voitures, vans, 4×4)
+                </span>
+              )}
+            </span>
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="max-h-72 overflow-y-auto -mx-1 px-1">
+          {loading ? (
+            <div className="py-8 flex items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            </div>
+          ) : eligibleDrivers.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+              Aucun chauffeur compatible n'est disponible dans votre flotte pour cette catégorie de permis.
+              {requiredLicense === "license_d" && (
+                <span className="block mt-1 text-xs">
+                  Ajoutez ou validez un chauffeur titulaire du permis D depuis Gestion des chauffeurs.
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {eligibleDrivers.map((d) => {
+                const isSelected = selected === d.id;
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => setSelected(d.id)}
+                    className={`w-full text-left rounded-xl border p-3 transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/5"
+                        : "border-border hover:border-primary/40"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-foreground truncate">{d.fullName}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {d.phone ?? "—"}
+                          {d.licenseNumber && ` · ${d.licenseNumber}`}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        {d.driverOnline ? (
+                          <Badge variant="outline" className="text-[10px] bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400 gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> En ligne
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px]">Hors ligne</Badge>
+                        )}
+                        {isSelected && <Check className="h-4 w-4 text-primary" />}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+            Annuler
+          </Button>
+          <Button onClick={handleConfirm} disabled={!selected || submitting}>
+            {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            Confirmer l'assignation
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+/**
+ * Carte d'une course déjà acceptée par le supplier. Réutilise la mise en page
+ * de RequestCard pour la cohérence visuelle, mais remplace le bouton
+ * « Accepter » par les actions de gestion : Assigner un chauffeur, et
+ * affichage du chauffeur déjà affecté le cas échéant.
+ */
+const AcceptedCourseCard = ({
+  r, onRefresh,
+}: {
+  r: RequestRow;
+  onRefresh?: () => void;
+}) => {
+  const [assignOpen, setAssignOpen] = useState(false);
+  const displayCode = r.code || `#${r.id.slice(0, 8)}`;
+  const luggageTotal = (r.largeLuggage ?? 0) + (r.smallLuggage ?? 0);
+  const hasDriver = !!r.assignedDriverId;
+
+  return (
+    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+      {/* En-tête */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+        <div className="flex items-center gap-2 text-xs">
+          <Hash className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="font-mono font-semibold text-foreground">{displayCode}</span>
+        </div>
+        {statusBadge(r.status)}
+      </div>
+
+      {/* Trajet + Client */}
+      <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wide">Trajet</p>
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="h-4 w-4 text-primary flex-shrink-0 mt-0.5" />
+            <p className="font-medium text-foreground truncate">{r.from}</p>
+          </div>
+          <div className="flex items-start gap-2 text-sm">
+            <MapPin className="h-4 w-4 text-accent flex-shrink-0 mt-0.5" />
+            <p className="font-medium text-foreground truncate">{r.to}</p>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-muted-foreground pt-1">
+            <span className="inline-flex items-center gap-1">
+              <CalendarDays className="h-3.5 w-3.5" /> {r.date}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3.5 w-3.5" /> {r.time}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground tracking-wide">Client</p>
+          <div className="flex items-center gap-2 text-sm">
+            <UserCheck className="h-4 w-4 text-primary flex-shrink-0" />
+            <p className="font-semibold text-foreground truncate">
+              {r.passengerName?.trim() || r.client || "Client"}
+            </p>
+          </div>
+          {r.passengerPhone && (
+            <a href={`tel:${r.passengerPhone}`} className="flex items-center gap-2 text-sm text-foreground hover:text-primary transition-colors">
+              <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="font-mono">{r.passengerPhone}</span>
+            </a>
+          )}
+          {r.passengerEmail && (
+            <a href={`mailto:${r.passengerEmail}`} className="flex items-center gap-2 text-xs text-muted-foreground hover:text-primary transition-colors min-w-0">
+              <Mail className="h-3.5 w-3.5 flex-shrink-0" />
+              <span className="truncate">{r.passengerEmail}</span>
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Badges besoins */}
+      <div className="px-4 pb-3 flex flex-wrap gap-2">
+        <Badge variant="outline" className="text-[11px] gap-1">
+          <Users className="h-3 w-3" /> {r.passengers ?? "?"} passager{(r.passengers ?? 0) > 1 ? "s" : ""}
+        </Badge>
+        {luggageTotal > 0 && (
+          <Badge variant="outline" className="text-[11px] gap-1">
+            <Luggage className="h-3 w-3" /> {luggageTotal} bagage{luggageTotal > 1 ? "s" : ""}
+          </Badge>
+        )}
+        {r.babySeat && (
+          <Badge variant="outline" className="text-[11px] gap-1 bg-accent/10 border-accent/30 text-accent">
+            <Baby className="h-3 w-3" /> Siège bébé
+          </Badge>
+        )}
+        {r.pmr && (
+          <Badge variant="outline" className="text-[11px] gap-1 bg-primary/10 border-primary/30 text-primary">
+            <Accessibility className="h-3 w-3" /> PMR
+          </Badge>
+        )}
+        {r.vehicle && (
+          <Badge variant="secondary" className="text-[11px] gap-1">
+            <Car className="h-3 w-3" /> {r.vehicle}
+          </Badge>
+        )}
+        {r.paymentStatus && (
+          <Badge variant="outline" className={`text-[11px] gap-1 ${
+            r.paymentStatus === "paid"
+              ? "bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400"
+              : "bg-muted text-muted-foreground"
+          }`}>
+            <CreditCard className="h-3 w-3" />
+            {r.paymentStatus === "paid" ? "Payé" : "Paiement en attente"}
+          </Badge>
+        )}
+      </div>
+
+      {/* Pied : prix + actions chauffeur */}
+      <div className="px-4 py-3 border-t border-border bg-muted/20 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Montant</p>
+          <p className="font-display text-lg font-bold text-primary">{r.price}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {hasDriver ? (
+            <Badge variant="outline" className="text-[11px] gap-1 bg-primary/10 border-primary/30 text-primary px-2.5 py-1">
+              <UserCheck className="h-3.5 w-3.5" /> Chauffeur assigné
+            </Badge>
+          ) : (
+            <Button
+              size="sm"
+              className="h-8 text-xs gap-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={() => setAssignOpen(true)}
+            >
+              <UserPlus className="h-3.5 w-3.5" /> Assigner un chauffeur
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <AssignDriverDialog
+        open={assignOpen}
+        onOpenChange={setAssignOpen}
+        course={r}
+        onAssigned={onRefresh}
+      />
+    </div>
+  );
+};
+
 const RequestsSection = ({
   requests, courses, useRealData, userRole = "", onRefresh,
 }: {
@@ -329,6 +1024,49 @@ const RequestsSection = ({
   onRefresh?: () => void;
 }) => {
   const isDriver = userRole === "driver_independent" || userRole === "driver_employee";
+
+  // Sous-classification de l'onglet "Courses acceptées" pour la société
+  // de transport. Permet de distinguer rapidement les courses qui exigent
+  // une action (assigner un chauffeur) de celles déjà en mouvement.
+  type AcceptedFilter = "all" | "toAssign" | "assigned" | "ongoing" | "completed" | "cancelled";
+  const [acceptedFilter, setAcceptedFilter] = useState<AcceptedFilter>("all");
+
+  const isToAssign = (c: RequestRow) => !c.assignedDriverId && c.status === "confirmed";
+  const isAssigned = (c: RequestRow) => !!c.assignedDriverId && c.status === "assigned";
+  // Pour le chauffeur, "En cours" englobe TOUT ce qui n'est ni terminé ni
+  // annulé (de l'instant où il accepte → trajet en route → trajet en cours).
+  const isOngoing = (c: RequestRow) =>
+    isDriver
+      ? c.status === "assigned" ||
+        c.status === "driver_en_route" ||
+        c.status === "arrived" ||
+        c.status === "in_progress" ||
+        c.status === "confirmed"
+      : c.status === "driver_en_route" ||
+        c.status === "arrived" ||
+        c.status === "in_progress";
+  const isCompleted = (c: RequestRow) => c.status === "completed";
+  const isCancelled = (c: RequestRow) => c.status === "cancelled";
+
+  const counts = {
+    all: courses.length,
+    toAssign: courses.filter(isToAssign).length,
+    assigned: courses.filter(isAssigned).length,
+    ongoing: courses.filter(isOngoing).length,
+    completed: courses.filter(isCompleted).length,
+    cancelled: courses.filter(isCancelled).length,
+  };
+
+  const filteredCourses = courses.filter((c) => {
+    if (acceptedFilter === "all") return true;
+    if (acceptedFilter === "toAssign") return isToAssign(c);
+    if (acceptedFilter === "assigned") return isAssigned(c);
+    if (acceptedFilter === "ongoing") return isOngoing(c);
+    if (acceptedFilter === "completed") return isCompleted(c);
+    if (acceptedFilter === "cancelled") return isCancelled(c);
+    return true;
+  });
+
   return (
   <div className="space-y-4">
     <div>
@@ -337,7 +1075,11 @@ const RequestsSection = ({
       </h2>
       <p className="text-sm text-muted-foreground mt-1">
         {useRealData
-          ? "Données en temps réel issues du backend. Cliquez sur \"Faire offre\" pour proposer un prix au client."
+          ? (isDriver
+              // Chauffeur indépendant : il accepte ou refuse une course
+              ? "Données en temps réel. Acceptez ou refusez les courses proposées."
+              // Société de transport : elle accepte puis assigne un chauffeur
+              : "Données en temps réel. Acceptez une réservation puis assignez-lui un chauffeur de votre flotte.")
           : "Aperçu (données de démonstration). Connectez-vous pour voir vos vraies réservations."}
       </p>
     </div>
@@ -355,145 +1097,128 @@ const RequestsSection = ({
       </TabsList>
 
       <TabsContent value="reservations" className="mt-4">
-        <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-border">
-            <h3 className="font-display font-semibold text-foreground text-sm">Nouvelles demandes de réservation</h3>
+        <div className="space-y-3">
+          <div className="bg-card rounded-2xl border border-border p-4 flex items-center justify-between">
+            <h3 className="font-display font-semibold text-foreground text-sm">
+              Nouvelles demandes de réservation
+            </h3>
+            <Badge variant="secondary" className="text-[10px]">
+              {requests.length} en attente
+            </Badge>
           </div>
+
           {requests.length === 0 ? (
-            <div className="p-12 text-center text-sm text-muted-foreground">Aucune réservation en attente.</div>
+            <div className="bg-card rounded-2xl border border-border p-12 text-center">
+              <Inbox className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">
+                Aucune réservation en attente pour le moment.
+              </p>
+            </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="text-xs">Réf.</TableHead>
-                    <TableHead className="text-xs">Client</TableHead>
-                    <TableHead className="text-xs">Trajet</TableHead>
-                    <TableHead className="text-xs">Date / Heure</TableHead>
-                    <TableHead className="text-xs">Véhicule</TableHead>
-                    <TableHead className="text-xs">Prix</TableHead>
-                    <TableHead className="text-xs">Statut</TableHead>
-                    <TableHead className="text-xs text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {requests.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell className="font-mono text-xs font-medium">{r.id.slice(0, 8)}</TableCell>
-                      <TableCell className="text-xs font-semibold">{r.client}</TableCell>
-                      <TableCell className="text-xs max-w-[220px]">
-                        <div className="truncate"><span className="text-muted-foreground">De :</span> {r.from}</div>
-                        <div className="truncate"><span className="text-muted-foreground">À :</span> {r.to}</div>
-                      </TableCell>
-                      <TableCell className="text-xs">{r.date}<br/><span className="text-muted-foreground">{r.time}</span></TableCell>
-                      <TableCell><Badge variant="secondary" className="text-[10px]">{r.vehicle}</Badge></TableCell>
-                      <TableCell className="text-xs font-semibold text-primary">{r.price}</TableCell>
-                      <TableCell>{statusBadge(r.status)}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {!useRealData ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 text-xs gap-1"
-                              onClick={() => toast({ title: "Démo", description: "Connectez-vous pour interagir avec une vraie réservation." })}
-                            >
-                              <Check className="h-3 w-3" /> Aperçu
-                            </Button>
-                          ) : isDriver ? (
-                            <>
-                              <Button
-                                size="sm"
-                                className="h-7 text-xs gap-1 bg-primary hover:bg-primary/90 text-primary-foreground"
-                                onClick={() => acceptAsDriver(r.id, onRefresh)}
-                              >
-                                <Check className="h-3 w-3" /> Accepter
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 text-xs gap-1"
-                                onClick={() => passAsDriver(r.id, onRefresh)}
-                              >
-                                <X className="h-3 w-3" /> Refuser
-                              </Button>
-                            </>
-                          ) : (
-                            <Button
-                              size="sm"
-                              className="h-7 text-xs gap-1 bg-primary hover:bg-primary/90 text-primary-foreground"
-                              onClick={() => submitOffer(r.id, r.price, onRefresh)}
-                            >
-                              <Check className="h-3 w-3" /> Faire offre
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            // Liste de cartes détaillées : chaque carte regroupe toutes les
+            // informations dont la société / le chauffeur a besoin pour
+            // décider s'il accepte ou refuse la course.
+            <div className="space-y-3">
+              {requests.map((r) => (
+                <RequestCard
+                  key={r.id}
+                  r={r}
+                  isDriver={isDriver}
+                  useRealData={useRealData}
+                  onRefresh={onRefresh}
+                />
+              ))}
             </div>
           )}
         </div>
       </TabsContent>
 
       <TabsContent value="accepted" className="mt-4">
-        <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-border">
-            <h3 className="font-display font-semibold text-foreground text-sm">Mes courses acceptées</h3>
+        <div className="space-y-3">
+          <div className="bg-card rounded-2xl border border-border p-4 flex items-center justify-between">
+            <h3 className="font-display font-semibold text-foreground text-sm">
+              Mes courses acceptées
+            </h3>
+            <Badge variant="secondary" className="text-[10px]">
+              {courses.length} active{courses.length > 1 ? "s" : ""}
+            </Badge>
           </div>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="text-xs">Réf.</TableHead>
-                  <TableHead className="text-xs">Client</TableHead>
-                  <TableHead className="text-xs">Trajet</TableHead>
-                  <TableHead className="text-xs">Date / Heure</TableHead>
-                  <TableHead className="text-xs">Véhicule</TableHead>
-                  <TableHead className="text-xs">Prix</TableHead>
-                  <TableHead className="text-xs">Statut</TableHead>
-                  <TableHead className="text-xs text-right">Détails</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {courses.map((c) => (
-                  <TableRow key={c.id}>
-                    <TableCell className="font-mono text-xs font-medium">{c.id}</TableCell>
-                    <TableCell className="text-xs font-semibold">{c.client}</TableCell>
-                    <TableCell className="text-xs max-w-[220px]">
-                      <div className="truncate"><span className="text-muted-foreground">De :</span> {c.from}</div>
-                      <div className="truncate"><span className="text-muted-foreground">À :</span> {c.to}</div>
-                    </TableCell>
-                    <TableCell className="text-xs">{c.date}<br/><span className="text-muted-foreground">{c.time}</span></TableCell>
-                    <TableCell><Badge variant="secondary" className="text-[10px]">{c.vehicle}</Badge></TableCell>
-                    <TableCell className="text-xs font-semibold text-primary">{c.price}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        {c.status === "completed" && (
-                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary/15">
-                            <Check className="h-3 w-3 text-primary" />
-                          </span>
-                        )}
-                        {c.status === "cancelled" && (
-                          <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-destructive/15">
-                            <X className="h-3 w-3 text-destructive" />
-                          </span>
-                        )}
-                        {statusBadge(c.status)}
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-primary">
-                        <ExternalLink className="h-3 w-3" /> Voir
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+
+          {/* Sous-filtres : adaptés selon le rôle. Pour un chauffeur
+              indépendant, les statuts "À assigner" et "Affectées" n'ont
+              pas de sens (il EST le chauffeur, dès qu'il accepte, la course
+              lui est affectée). On expose donc seulement :
+              Toutes / En cours / Terminées / Annulées.
+              Pour une société de transport, on garde les 6 pills d'origine. */}
+          {courses.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {(isDriver
+                ? [
+                    { id: "all" as const, label: "Toutes", count: counts.all, color: "" },
+                    { id: "ongoing" as const, label: "En cours", count: counts.assigned + counts.ongoing, color: "text-green-600" },
+                    { id: "completed" as const, label: "Terminées", count: counts.completed, color: "text-primary" },
+                    { id: "cancelled" as const, label: "Annulées", count: counts.cancelled, color: "text-destructive" },
+                  ]
+                : [
+                    { id: "all" as const, label: "Toutes", count: counts.all, color: "" },
+                    { id: "toAssign" as const, label: "À assigner", count: counts.toAssign, color: "text-accent" },
+                    { id: "assigned" as const, label: "Affectées au chauffeur", count: counts.assigned, color: "text-primary" },
+                    { id: "ongoing" as const, label: "En cours", count: counts.ongoing, color: "text-green-600" },
+                    { id: "completed" as const, label: "Terminées", count: counts.completed, color: "text-primary" },
+                    { id: "cancelled" as const, label: "Annulées", count: counts.cancelled, color: "text-destructive" },
+                  ]
+              ).map((opt) => {
+                const isActive = acceptedFilter === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    onClick={() => setAcceptedFilter(opt.id)}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors inline-flex items-center gap-1.5 ${
+                      isActive
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card border-border hover:border-primary/40"
+                    }`}
+                  >
+                    {opt.label}
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${
+                        isActive ? "bg-primary-foreground/20" : "bg-muted"
+                      } ${!isActive ? opt.color : ""}`}
+                    >
+                      {opt.count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {courses.length === 0 ? (
+            <div className="bg-card rounded-2xl border border-border p-12 text-center">
+              <CheckCircle2 className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">
+                Vous n'avez accepté aucune course pour le moment.
+              </p>
+            </div>
+          ) : filteredCourses.length === 0 ? (
+            <div className="bg-card rounded-2xl border border-border p-12 text-center">
+              <CheckCircle2 className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">
+                Aucune course dans cette catégorie.
+              </p>
+            </div>
+          ) : (
+            // Cartes détaillées : mêmes infos que pour l'onglet Réservations,
+            // mais avec un bouton "Assigner un chauffeur" à la place du bouton
+            // Accepter (la course est déjà à nous). Le bouton ouvre un dialog
+            // qui filtre les chauffeurs par catégorie de permis compatible
+            // avec le véhicule demandé.
+            <div className="space-y-3">
+              {filteredCourses.map((c) => (
+                <AcceptedCourseCard key={c.id} r={c} onRefresh={onRefresh} />
+              ))}
+            </div>
+          )}
         </div>
       </TabsContent>
     </Tabs>

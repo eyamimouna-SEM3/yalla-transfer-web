@@ -6,23 +6,43 @@ import { Textarea } from "@/components/ui/textarea";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import { toast } from "@/hooks/use-toast";
+import { api } from "@/services/api";
 
 const ContactPage = () => {
   const [form, setForm] = useState({ name: "", email: "", website: "", message: "" });
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim() || !form.email.trim() || !form.message.trim()) {
       toast({ title: "Veuillez remplir les champs obligatoires.", variant: "destructive" });
       return;
     }
     setLoading(true);
-    setTimeout(() => {
-      toast({ title: "Message envoyé !", description: "Nous vous répondrons dans les plus brefs délais." });
+    try {
+      // POST public vers /api/contact — le backend forwarde l'email à
+      // l'adresse configurée par CONTACT_EMAIL (yallago90@gmail.com par défaut).
+      await api.post("/contact", {
+        name: form.name.trim(),
+        email: form.email.trim().toLowerCase(),
+        website: form.website.trim() || undefined,
+        message: form.message.trim(),
+      });
+      toast({
+        title: "Message envoyé !",
+        description: "Nous avons bien reçu votre message et vous répondrons dans les plus brefs délais.",
+      });
       setForm({ name: "", email: "", website: "", message: "" });
+    } catch (err) {
+      const e = err as { message?: string };
+      toast({
+        title: "Envoi impossible",
+        description: e?.message ?? "Réessayez dans un instant ou contactez-nous directement à contact@yallatransfer.com",
+        variant: "destructive",
+      });
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   return (

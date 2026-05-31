@@ -11,6 +11,14 @@ export const driverService = {
   },
 
   /**
+   * Liste complète des courses du pool disponibles (chauffeur indépendant).
+   * Inclut tous les statuts acceptables (pending + confirmed sans driver).
+   */
+  async availableBookings(): Promise<Booking[]> {
+    return api.get<Booking[]>("/driver/available-bookings");
+  },
+
+  /**
    * Le chauffeur accepte la course passée en paramètre (ou la prochaine si bookingId omis).
    */
   async acceptBooking(bookingId?: string) {

@@ -167,6 +167,42 @@ export const authService = {
   },
 
   /**
+   * Met à jour le profil utilisateur (nom, email, téléphone, adresse).
+   * Endpoint : PATCH /auth/me/profile
+   */
+  async updateProfile(data: {
+    fullName?: string;
+    email?: string;
+    phone?: string;
+    address?: string;
+  }) {
+    const user = await api.patch<AuthUser>("/auth/me/profile", data);
+    tokenStorage.setUser(user);
+    return user;
+  },
+
+  /**
+   * Met à jour les préférences UI (langue, thème).
+   * Endpoint : PATCH /auth/me/preferences
+   */
+  async updatePreferences(data: { locale?: string; themeMode?: string }) {
+    const user = await api.patch<AuthUser>("/auth/me/preferences", data);
+    tokenStorage.setUser(user);
+    return user;
+  },
+
+  /**
+   * Change le mot de passe (requiert l'ancien).
+   * Endpoint : POST /auth/change-password
+   */
+  async changePassword(currentPassword: string, newPassword: string) {
+    return api.post<{ ok: boolean }>("/auth/change-password", {
+      currentPassword,
+      newPassword,
+    });
+  },
+
+  /**
    * Envoie un code de vérification à 6 chiffres par email (Nodemailer côté backend).
    * À appeler AVANT register() côté web.
    */

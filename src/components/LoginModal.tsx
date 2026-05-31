@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Mail, Lock, Eye, EyeOff, ArrowRight, Loader2 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { authService } from "@/services/authService";
+import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import ForgotPasswordDialog from "@/components/ForgotPasswordDialog";
 
@@ -22,14 +23,23 @@ const LoginModal = ({ open, onOpenChange }: LoginModalProps) => {
   const [showForgot, setShowForgot] = useState(false);
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { refresh } = useAuth();
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      // Connexion via NestJS backend
+      // 1) Connexion via NestJS backend (POST /auth/login) → token + user
+      //    sauvegardés en sessionStorage par authService.
       const response = await authService.login(email, password);
+
+      // 2) Force le refresh du contexte useAuth pour que `user` soit mis à
+      //    jour SYNCHRONIQUEMENT. Sans ce refresh, AdminRouteGuard et les
+      //    redirections protégées voient encore `user === null` et nous
+      //    renvoient à la home → c'est pour ça que l'admin "ne se connecte
+      //    pas" depuis ce modal.
+      await refresh();
 
       onOpenChange(false);
       setEmail("");
@@ -38,11 +48,27 @@ const LoginModal = ({ open, onOpenChange }: LoginModalProps) => {
       if (response.user.role === "admin") {
         navigate("/admin");
       } else {
-        navigate("/dashboard", { state: { profile: response.user.role === "client_b2c" ? "particulier" : response.user.role === "client_b2b" ? "corporate" : response.user.role === "supplier" ? "transport" : "chauffeur", name: response.user.full_name || response.user.fullName } });
+        navigate("/dashboard", {
+          state: {
+            profile:
+              response.user.role === "client_b2c"
+                ? "particulier"
+                : response.user.role === "client_b2b"
+                  ? "corporate"
+                  : response.user.role === "supplier"
+                    ? "transport"
+                    : "chauffeur",
+            name: response.user.full_name || response.user.fullName,
+          },
+        });
       }
     } catch (error: any) {
       console.error("Login error:", error);
-      const errorMessage = error?.data?.message || error?.message || error?.data?.error || "Email ou mot de passe incorrect.";
+      const errorMessage =
+        error?.data?.message ||
+        error?.message ||
+        error?.data?.error ||
+        "Email ou mot de passe incorrect.";
       toast({
         title: "Erreur de connexion",
         description: errorMessage,
@@ -70,6 +96,9 @@ const LoginModal = ({ open, onOpenChange }: LoginModalProps) => {
             <DialogTitle className="font-display text-2xl font-bold text-foreground">
               Bienvenue !
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Saisis ton email et ton mot de passe pour accéder à ton espace Yalla Transfer.
+            </DialogDescription>
             <p className="text-sm text-muted-foreground mt-1">
               Connectez-vous à votre espace Yalla Transfer
             </p>

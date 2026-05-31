@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { ArrowLeft, ArrowRight, Building2, CheckCircle2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { authService } from "@/services/authService";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -27,6 +28,7 @@ const FieldLabel = ({ children, required }: { children: React.ReactNode; require
 
 const FormCorporate = ({ name, email, password, onBack }: Props) => {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [form, setForm] = useState({
     raisonSociale: name,
     activityType: "",
@@ -96,6 +98,7 @@ const FormCorporate = ({ name, email, password, onBack }: Props) => {
         responsibleEmail: form.emailPro,
         responsiblePhone: form.telephonePro,
       });
+      await refresh();
       setSuccess(true);
       toast.success("Inscription réussie ! Bienvenue sur Yalla Transfer.");
       setTimeout(() => navigate("/dashboard", { state: { profile: "corporate", name } }), 2000);

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Users, Luggage, Baby, Accessibility, ArrowRight, Star, ShoppingCart, Plus, Minus } from "lucide-react";
 import { vehicleTypes, VehicleType } from "@/data/vehicleTypes";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "@/hooks/use-toast";
 
 // Smart vehicle category filtering based on passenger count
 const getRelevantCategories = (passengers: number, pmr: boolean): string[] => {
@@ -77,10 +78,16 @@ const VehicleSelectionPage = () => {
         const { [offerId]: _, ...rest } = prev;
         return rest;
       }
-      // Prevent selecting more vehicles than passengers
+      // Empêche de sélectionner plus de véhicules que de passagers : un
+      // véhicule par passager n'a aucun sens et conduirait à des courses vides.
       const currentTotal = Object.values(prev).reduce((s, q) => s + q, 0);
       if (delta > 0 && currentTotal >= passengers) {
-        return prev; // Don't allow adding more vehicles than passengers
+        toast({
+          title: "Limite atteinte",
+          description: `Vous ne pouvez pas réserver plus de ${passengers} véhicule(s) pour ${passengers} passager(s).`,
+          variant: "destructive",
+        });
+        return prev;
       }
       return { ...prev, [offerId]: next };
     });
@@ -226,34 +233,44 @@ const VehicleSelectionPage = () => {
 
                         {/* Quantity controls — direct toggle on card click + / - */}
                         <div className="pt-1">
-                          {qty === 0 ? (
-                            <button
-                              onClick={() => updateQuantity(offer.id, 1)}
-                              className="w-full h-9 text-xs font-semibold rounded-lg border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 hover:text-primary transition-all text-muted-foreground"
-                            >
-                              Cliquez pour sélectionner
-                            </button>
-                          ) : (
-                            <div className="flex items-center justify-between bg-primary/10 rounded-lg border border-primary/30 px-2 py-1">
-                              <button
-                                onClick={() => updateQuantity(offer.id, -1)}
-                                className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-primary/20 text-primary transition-colors"
-                                aria-label="Diminuer"
-                              >
-                                <Minus className="h-4 w-4" />
-                              </button>
-                              <span className="text-sm font-bold text-primary">
-                                {qty} sélectionné{qty > 1 ? "s" : ""}
-                              </span>
-                              <button
-                                onClick={() => updateQuantity(offer.id, 1)}
-                                className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-primary/20 text-primary transition-colors"
-                                aria-label="Augmenter"
-                              >
-                                <Plus className="h-4 w-4" />
-                              </button>
-                            </div>
-                          )}
+                          {(() => {
+                            const reachedLimit = totalSelectedCount >= passengers;
+                            if (qty === 0) {
+                              return (
+                                <button
+                                  onClick={() => updateQuantity(offer.id, 1)}
+                                  disabled={reachedLimit}
+                                  className="w-full h-9 text-xs font-semibold rounded-lg border-2 border-dashed border-border hover:border-primary hover:bg-primary/5 hover:text-primary transition-all text-muted-foreground disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-border disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                                  title={reachedLimit ? `Maximum ${passengers} véhicule(s) atteint` : undefined}
+                                >
+                                  {reachedLimit ? `Limite ${passengers} atteinte` : "Cliquez pour sélectionner"}
+                                </button>
+                              );
+                            }
+                            return (
+                              <div className="flex items-center justify-between bg-primary/10 rounded-lg border border-primary/30 px-2 py-1">
+                                <button
+                                  onClick={() => updateQuantity(offer.id, -1)}
+                                  className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-primary/20 text-primary transition-colors"
+                                  aria-label="Diminuer"
+                                >
+                                  <Minus className="h-4 w-4" />
+                                </button>
+                                <span className="text-sm font-bold text-primary">
+                                  {qty} sélectionné{qty > 1 ? "s" : ""}
+                                </span>
+                                <button
+                                  onClick={() => updateQuantity(offer.id, 1)}
+                                  disabled={reachedLimit}
+                                  className="w-8 h-8 flex items-center justify-center rounded-md hover:bg-primary/20 text-primary transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                  aria-label="Augmenter"
+                                  title={reachedLimit ? `Maximum ${passengers} véhicule(s) atteint` : undefined}
+                                >
+                                  <Plus className="h-4 w-4" />
+                                </button>
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>

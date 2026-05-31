@@ -16,8 +16,14 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import {
-  CalendarDays, PlusCircle, CreditCard, TrendingUp, Download, AlertCircle, Upload, Wallet, Bell, CheckCircle2, Clock, Receipt, Users, FileSpreadsheet, Pencil, Plane, XCircle,
+  CalendarDays, PlusCircle, CreditCard, TrendingUp, Download, AlertCircle, Upload, Wallet, Bell, CheckCircle2, Clock, Receipt, Users, FileSpreadsheet, Plane, XCircle,
+  User, Lock, Eye, EyeOff, Settings as Cog, Info, Loader2,
 } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
+import { useTheme, type ThemeMode } from "@/hooks/useTheme";
+import { useLocale } from "@/hooks/useLocale";
+import BookingForm from "@/components/BookingForm";
+import { notificationService, type UserNotification } from "@/services/notificationService";
 import CancelReservationDialog from "@/components/dashboard/CancelReservationDialog";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -32,18 +38,20 @@ import { useBookingsRealtime } from "@/hooks/useBookingsRealtime";
 import { pendingBookingStorage } from "@/utils/pendingBooking";
 import { tokenStorage } from "@/utils/tokenStorage";
 
-const navConfigs: Record<string, NavItem[]> = {
+// Construit les configurations de navigation en utilisant les traductions.
+// Appelé depuis le composant pour bénéficier du re-render à chaque
+// changement de langue.
+const buildNavConfigs = (t: (k: string) => string): Record<string, NavItem[]> => ({
   particulier: [
-    { icon: CalendarDays, label: "Mes réservations", id: "reservations" },
-    { icon: CreditCard, label: "Historique des paiements", id: "payments" },
+    { icon: CalendarDays, label: t("dashboard.myReservations"), id: "reservations" },
+    { icon: CreditCard, label: t("dashboard.paymentsHistory"), id: "payments" },
   ],
   corporate: [
-    { icon: CalendarDays, label: "Mes réservations", id: "reservations" },
-    { icon: Users, label: "Réservation de groupe", id: "group" },
-    { icon: FileSpreadsheet, label: "Facturation mensuelle", id: "invoices" },
-    { icon: CreditCard, label: "Historique des paiements", id: "payments" },
+    { icon: CalendarDays, label: t("dashboard.myReservations"), id: "reservations" },
+    { icon: FileSpreadsheet, label: t("dashboard.monthlyInvoices"), id: "invoices" },
+    { icon: CreditCard, label: t("dashboard.paymentsHistory"), id: "payments" },
   ],
-};
+});
 
 // Mock reservations
 const mockReservations = [
@@ -75,9 +83,16 @@ const mockPayments = [
   { reservationId: "RES-005", date: "2026-02-09", amount: 60, method: "Carte internationale", status: "paid" },
 ];
 
+// Mappage des status de réservation vers les libellés affichés côté client.
+// Nouveau workflow : une réservation neuve est "pending" tant qu'un fournisseur
+// ne l'a pas explicitement acceptée → libellé "En attente du fournisseur".
 const statusLabels: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
+  pending: { label: "En attente du fournisseur", variant: "secondary" },
   confirmed: { label: "Confirmée", variant: "default" },
-  pending: { label: "En attente", variant: "secondary" },
+  assigned: { label: "Chauffeur assigné", variant: "default" },
+  driver_en_route: { label: "Chauffeur en route", variant: "default" },
+  arrived: { label: "Chauffeur arrivé", variant: "default" },
+  in_progress: { label: "En cours", variant: "default" },
   ongoing: { label: "En cours", variant: "default" },
   completed: { label: "Terminée", variant: "outline" },
   cancelled: { label: "Annulée", variant: "destructive" },
@@ -124,14 +139,11 @@ const DashboardPage = () => {
         ]);
         setBookings(mergeUnique([...unassigned, ...recent]));
       } else if (role === "driver_independent" || role === "driver_employee") {
-        const [next, assigned] = await Promise.all([
-          driverService.nextBooking().catch(() => null),
+        const [pool, mine] = await Promise.all([
+          driverService.availableBookings().catch(() => [] as Booking[]),
           bookingService.getAll().catch(() => [] as Booking[]),
         ]);
-        const all: Booking[] = [];
-        if (next) all.push(next);
-        all.push(...assigned);
-        setBookings(mergeUnique(all));
+        setBookings(mergeUnique([...pool, ...mine]));
       } else {
         const bookingsData = await bookingService.getAll();
         setBookings(bookingsData);
@@ -147,6 +159,8 @@ const DashboardPage = () => {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Compteur de notifications non lues pour le badge de la cloche du header.
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   // Charger les données depuis la DB
   useEffect(() => {
@@ -200,15 +214,14 @@ const DashboardPage = () => {
           const merged = mergeUnique([...unassigned, ...recent]);
           if (!cancelled) setBookings(merged);
         } else if (isDriver) {
-          // Chauffeur voit : la prochaine course bookable + ses courses déjà assignées.
-          const [next, assigned] = await Promise.all([
-            driverService.nextBooking().catch(() => null),
+          // Chauffeur voit :
+          //  - le pool complet des courses disponibles (assignedDriverId NULL)
+          //  - ses propres courses déjà assignées/terminées/annulées
+          const [pool, mine] = await Promise.all([
+            driverService.availableBookings().catch(() => [] as Booking[]),
             bookingService.getAll().catch(() => [] as Booking[]),
           ]);
-          const all: Booking[] = [];
-          if (next) all.push(next);
-          all.push(...assigned);
-          if (!cancelled) setBookings(mergeUnique(all));
+          if (!cancelled) setBookings(mergeUnique([...pool, ...mine]));
         } else {
           // Client B2C / B2B : ses propres réservations.
           const bookingsData = await bookingService.getAll();
@@ -218,15 +231,8 @@ const DashboardPage = () => {
         console.warn("Impossible de charger les réservations:", e);
       }
 
-      try {
-        // Les paiements de l'utilisateur sont liés aux bookings — on lit depuis bookings.payment
-        // (le backend ne propose pas /payments pour l'utilisateur final, seulement /payments/methods)
-        if (!cancelled) {
-          setPayments([]);
-        }
-      } catch (e) {
-        console.warn("Impossible de charger les paiements:", e);
-      }
+      // Les paiements sont extraits depuis bookings.payment via un useEffect
+      // dédié (plus bas), pour qu'ils restent synchronisés avec les bookings.
 
       if (!cancelled) setLoading(false);
     };
@@ -237,6 +243,45 @@ const DashboardPage = () => {
       clearTimeout(timeoutId);
     };
   }, []);
+
+  // Extrait les paiements depuis le champ `payment` de chaque réservation.
+  // Le backend ne propose pas d'endpoint /payments dédié aux clients, mais
+  // chaque booking porte déjà l'info de paiement liée.
+  useEffect(() => {
+    const extracted: Payment[] = [];
+    for (const b of bookings) {
+      if (b.payment && b.payment.id) {
+        extracted.push({
+          id: b.payment.id,
+          bookingId: b.id,
+          amount: Number(b.payment.amount ?? 0),
+          currency: "TND",
+          method: b.payment.method ?? "card",
+          status: (b.payment.status as Payment["status"]) ?? "pending",
+          voucherCode: b.payment.voucherCode,
+          voucherUrl: b.payment.voucherUrl,
+          createdAt: b.createdAt,
+        });
+      }
+    }
+    setPayments(extracted);
+  }, [bookings]);
+
+  // Charger le nombre de notifications non lues pour le badge de la cloche.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await notificationService.listMine();
+        if (!cancelled) {
+          setUnreadNotifications(list.filter((n) => !n.read).length);
+        }
+      } catch {
+        // silencieux — pas critique
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [userData?.id]);
 
   // Synchro temps réel : nouvelles réservations / changements de statut depuis web ou mobile.
   useBookingsRealtime({
@@ -288,6 +333,8 @@ const DashboardPage = () => {
     setContractStatus("validated");
   }, []);
 
+  const { t } = useLocale();
+  const navConfigs = buildNavConfigs(t);
   const navItems = navConfigs[profile] || navConfigs.particulier;
   const [activeItem, setActiveItem] = useState(navItems[0]?.id || "");
 
@@ -335,6 +382,7 @@ const DashboardPage = () => {
       navItems={navItems}
       activeItem={activeItem}
       onNavChange={setActiveItem}
+      unreadNotifications={unreadNotifications}
     >
       {pendingVoucher && (
         <div className="mb-6 flex items-start gap-3 p-4 bg-accent/10 border border-accent/30 rounded-xl">
@@ -353,10 +401,10 @@ const DashboardPage = () => {
 
       <div className="mb-8">
         <h1 className="font-display text-2xl lg:text-3xl font-bold text-foreground">
-          👋 Bienvenue, {userName}
+          👋 {t("dashboard.welcome", { name: userName })}
         </h1>
         <p className="text-muted-foreground mt-1">
-          Votre espace personnel vous permet de gérer vos réservations et vos paiements en toute simplicité.
+          {t("dashboard.subtitle")}
         </p>
       </div>
 
@@ -370,6 +418,7 @@ const DashboardPage = () => {
 // ================= PARTICULIER =================
 
 const ParticulierContent = ({ active, onNavChange, bookings, payments }: { active: string; onNavChange: (id: string) => void; bookings: Booking[]; payments: Payment[] }) => {
+  const { t } = useLocale();
   const totalPaid = useMemo(
     () => payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0),
     [payments]
@@ -383,13 +432,13 @@ const ParticulierContent = ({ active, onNavChange, bookings, payments }: { activ
     <div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         <button onClick={() => onNavChange("reservations")} className="text-left">
-          <StatCard icon={CalendarDays} label="Réservations" value={bookings.length} />
+          <StatCard icon={CalendarDays} label={t("dashboard.myReservations")} value={bookings.length} />
         </button>
         <button onClick={() => onNavChange("payments")} className="text-left">
-          <StatCard icon={Wallet} label="Total payé" value={`${totalPaid} TND`} />
+          <StatCard icon={Wallet} label={t("dashboard.totalBilled")} value={`${totalPaid} TND`} />
         </button>
         <button onClick={() => onNavChange("reservations")} className="text-left">
-          <StatCard icon={TrendingUp} label="Trajets effectués" value={completedCount} />
+          <StatCard icon={TrendingUp} label={t("dashboard.completedTransfers")} value={completedCount} />
         </button>
       </div>
 
@@ -401,6 +450,7 @@ const ParticulierContent = ({ active, onNavChange, bookings, payments }: { activ
 
 const ReservationsHub = ({ bookings }: { bookings: Booking[] }) => {
   const navigate = useNavigate();
+  const { t } = useLocale();
   const now = new Date();
 
   const apiReservations = useMemo<DashboardReservation[]>(() => bookings.map(b => {
@@ -424,8 +474,10 @@ const ReservationsHub = ({ bookings }: { bookings: Booking[] }) => {
     setReservations(apiReservations);
   }, [apiReservations]);
 
-  const [editing, setEditing] = useState<DashboardReservation | null>(null);
   const [cancelling, setCancelling] = useState<DashboardReservation | null>(null);
+  // Dialog "Nouvelle réservation" : permet de saisir une réservation sans
+  // quitter le dashboard (l'avatar et la sidebar restent visibles).
+  const [showNewBooking, setShowNewBooking] = useState(false);
 
   const upcoming = reservations.filter(r =>
     (r.status === "confirmed" || r.status === "pending") && new Date(r.date) >= now
@@ -434,15 +486,6 @@ const ReservationsHub = ({ bookings }: { bookings: Booking[] }) => {
   const past = reservations.filter(r =>
     r.status === "completed" || r.status === "cancelled"
   );
-
-  const handleSave = (updated: DashboardReservation) => {
-    setReservations(prev => prev.map(r => r.id === updated.id ? updated : r));
-    setEditing(null);
-    toast({
-      title: "✅ Réservation modifiée",
-      description: `La réservation ${updated.id} a été mise à jour avec succès.`,
-    });
-  };
 
   const handleCancelConfirm = (id: string) => {
     setReservations(prev => prev.map(r => r.id === id ? { ...r, status: "cancelled" } : r));
@@ -453,59 +496,70 @@ const ReservationsHub = ({ bookings }: { bookings: Booking[] }) => {
     <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
       <div className="p-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="font-display font-semibold text-foreground">Mes réservations</h2>
+          <h2 className="font-display font-semibold text-foreground">{t("dashboard.myReservations")}</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Vous pouvez modifier une réservation jusqu'à 24h avant le transfert.
+            {t("dashboard.cancelHint")}
           </p>
         </div>
-        <Button onClick={() => navigate("/#booking")} size="sm" className="gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground">
-          <PlusCircle className="h-4 w-4" /> Nouvelle réservation
+        <Button onClick={() => setShowNewBooking(true)} size="sm" className="gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground">
+          <PlusCircle className="h-4 w-4" /> {t("dashboard.newReservation")}
         </Button>
       </div>
 
       <Tabs defaultValue="upcoming" className="w-full">
         <div className="px-4 pt-4">
           <TabsList className="grid grid-cols-3 w-full sm:w-auto">
-            <TabsTrigger value="upcoming">En attente ({upcoming.length})</TabsTrigger>
-            <TabsTrigger value="ongoing">En cours ({ongoing.length})</TabsTrigger>
-            <TabsTrigger value="past">Terminées ({past.length})</TabsTrigger>
+            <TabsTrigger value="upcoming">{t("dashboard.tabs.pending")} ({upcoming.length})</TabsTrigger>
+            <TabsTrigger value="ongoing">{t("dashboard.tabs.inProgress")} ({ongoing.length})</TabsTrigger>
+            <TabsTrigger value="past">{t("dashboard.tabs.completed")} ({past.length})</TabsTrigger>
           </TabsList>
         </div>
 
         <TabsContent value="upcoming" className="mt-0">
-          <ReservationsTable items={upcoming} emptyMessage="Aucune réservation en attente." onEdit={setEditing} onCancel={setCancelling} />
+          <ReservationsTable items={upcoming} emptyMessage={t("dashboard.empty.pending")} onCancel={setCancelling} />
         </TabsContent>
         <TabsContent value="ongoing" className="mt-0">
-          <ReservationsTable items={ongoing} emptyMessage="Aucune réservation en cours." onEdit={setEditing} onCancel={setCancelling} />
+          <ReservationsTable items={ongoing} emptyMessage={t("dashboard.empty.inProgress")} onCancel={setCancelling} />
         </TabsContent>
         <TabsContent value="past" className="mt-0">
-          <ReservationsTable items={past} emptyMessage="Aucune réservation terminée." onEdit={setEditing} />
+          <ReservationsTable items={past} emptyMessage={t("dashboard.empty.completed")} />
         </TabsContent>
       </Tabs>
-
-      <EditReservationDialog
-        reservation={editing}
-        onClose={() => setEditing(null)}
-        onSave={handleSave}
-      />
 
       <CancelReservationDialog
         reservation={cancelling}
         onClose={() => setCancelling(null)}
         onConfirm={(id) => handleCancelConfirm(id)}
       />
+
+      {/* Dialog Nouvelle réservation : l'utilisateur reste connecté dans son
+          dashboard. À la soumission, navigation vers /booking?... — même page
+          que depuis la home. */}
+      <Dialog open={showNewBooking} onOpenChange={setShowNewBooking}>
+        <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto p-0 sm:p-0">
+          <DialogHeader className="px-6 pt-6 pb-2">
+            <DialogTitle>{t("dashboard.newReservation")}</DialogTitle>
+            <DialogDescription>
+              {t("dashboard.subtitle")}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-4 pb-6">
+            <BookingForm compact />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
 
 const ReservationsTable = ({
-  items, emptyMessage, onEdit, onCancel,
+  items, emptyMessage, onCancel,
 }: {
   items: DashboardReservation[];
   emptyMessage: string;
-  onEdit?: (r: DashboardReservation) => void;
   onCancel?: (r: DashboardReservation) => void;
 }) => {
+  const { t } = useLocale();
   if (items.length === 0) {
     return (
       <div className="p-6">
@@ -519,22 +573,24 @@ const ReservationsTable = ({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="text-xs">ID</TableHead>
-            <TableHead className="text-xs">Date</TableHead>
-            <TableHead className="text-xs">Heure</TableHead>
-            <TableHead className="text-xs">Trajet</TableHead>
-            <TableHead className="text-xs">Véhicule</TableHead>
-            <TableHead className="text-xs">Tarif</TableHead>
-            <TableHead className="text-xs">Statut</TableHead>
-            <TableHead className="text-xs text-right">Actions</TableHead>
+            <TableHead className="text-xs">{t("table.id")}</TableHead>
+            <TableHead className="text-xs">{t("table.date")}</TableHead>
+            <TableHead className="text-xs">{t("table.time")}</TableHead>
+            <TableHead className="text-xs">{t("table.trip")}</TableHead>
+            <TableHead className="text-xs">{t("table.vehicle")}</TableHead>
+            <TableHead className="text-xs">{t("table.price")}</TableHead>
+            <TableHead className="text-xs">{t("table.status")}</TableHead>
+            <TableHead className="text-xs text-right">{t("table.actions")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {items.map(res => {
             const status = statusLabels[res.status] || statusLabels.pending;
+            const statusLabel = t(`bookingStatus.${res.status}` as any) || status.label;
             const transferDate = new Date(`${res.date}T${res.time}`);
             const hoursBefore = (transferDate.getTime() - now.getTime()) / (1000 * 60 * 60);
-            const canEdit = onEdit && hoursBefore >= 24 && (res.status === "confirmed" || res.status === "pending");
+            // La modification d'une réservation a été retirée : seule l'annulation
+            // est désormais possible côté client (web + mobile).
             const canCancel = onCancel && (res.status === "confirmed" || res.status === "pending") && hoursBefore > 0;
             return (
               <TableRow key={res.id} className="hover:bg-muted/40 transition-colors">
@@ -547,30 +603,19 @@ const ReservationsTable = ({
                 </TableCell>
                 <TableCell className="text-xs font-semibold text-primary">{res.price} TND</TableCell>
                 <TableCell>
-                  <Badge variant={status.variant} className="text-[10px]">{status.label}</Badge>
+                  <Badge variant={status.variant} className="text-[10px]">{statusLabel}</Badge>
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
-                    {canEdit && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs gap-1 text-primary hover:bg-primary/10"
-                        onClick={() => onEdit?.(res)}
-                        title="Modifier la réservation (>24h avant le transfert)"
-                      >
-                        <Pencil className="h-3 w-3" /> Modifier
-                      </Button>
-                    )}
                     {canCancel && (
                       <Button
                         size="sm"
                         variant="ghost"
                         className="h-7 text-xs gap-1 text-destructive hover:bg-destructive/10"
                         onClick={() => onCancel?.(res)}
-                        title="Annuler la réservation"
+                        title={t("dashboard.actions.cancel")}
                       >
-                        <XCircle className="h-3 w-3" /> Annuler
+                        <XCircle className="h-3 w-3" /> {t("dashboard.actions.cancel")}
                       </Button>
                     )}
                     {res.voucherReady && (
@@ -596,7 +641,7 @@ const ReservationsTable = ({
                         <Download className="h-3 w-3" /> PDF
                       </Button>
                     )}
-                    {!res.voucherReady && !canEdit && !canCancel && (
+                    {!res.voucherReady && !canCancel && (
                       <span className="text-[10px] text-muted-foreground">—</span>
                     )}
                   </div>
@@ -676,202 +721,152 @@ const EditReservationDialog = ({
   );
 };
 
-const PaymentsHistory = ({ payments }: { payments: Payment[] }) => (
-  <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-    <div className="p-4 border-b border-border">
-      <h2 className="font-display font-semibold text-foreground">Historique des paiements</h2>
-      <p className="text-xs text-muted-foreground mt-0.5">
-        Tous vos paiements effectués avec le détail de chaque transaction.
-      </p>
-    </div>
-    {payments.length === 0 ? (
-      <div className="p-6"><EmptyState message="Aucun paiement enregistré." /></div>
-    ) : (
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="text-xs">ID Réservation</TableHead>
-              <TableHead className="text-xs">Date</TableHead>
-              <TableHead className="text-xs">Montant payé</TableHead>
-              <TableHead className="text-xs">Mode de paiement</TableHead>
-              <TableHead className="text-xs">Statut</TableHead>
-              <TableHead className="text-xs text-right">Reçu</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {payments.map(p => {
-              const status = paymentStatusLabels[p.status] || paymentStatusLabels.pending;
-              return (
-                <TableRow key={p.bookingId + p.createdAt}>
-                  <TableCell className="font-mono text-xs font-medium">{p.bookingId}</TableCell>
-                  <TableCell className="text-xs">{new Date(p.createdAt).toLocaleDateString('fr-FR')}</TableCell>
-                  <TableCell className="text-xs font-semibold text-primary">{p.amount} {p.currency}</TableCell>
-                  <TableCell className="text-xs">{p.method}</TableCell>
-                  <TableCell>
-                    <Badge variant={status.variant} className="text-[10px]">{status.label}</Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {p.status === "paid" ? (
-                      <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-primary">
-                        <Download className="h-3 w-3" /> PDF
-                      </Button>
-                    ) : (
-                      <span className="text-[10px] text-muted-foreground">—</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </Table>
+const PaymentsHistory = ({ payments }: { payments: Payment[] }) => {
+  const { t, locale } = useLocale();
+  // Mappe la langue UI vers la locale de Date pour formater la date dans
+  // la même langue que le reste de l'interface (fr → fr-FR, en → en-GB, es → es-ES).
+  const dateLocale = locale === "en" ? "en-GB" : locale === "es" ? "es-ES" : "fr-FR";
+  return (
+    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+      <div className="p-4 border-b border-border">
+        <h2 className="font-display font-semibold text-foreground">{t("payments.title")}</h2>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {t("payments.subtitle")}
+        </p>
       </div>
-    )}
-  </div>
-);
+      {payments.length === 0 ? (
+        <div className="p-6"><EmptyState message={t("payments.empty")} /></div>
+      ) : (
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs">{t("payments.bookingId")}</TableHead>
+                <TableHead className="text-xs">{t("table.date")}</TableHead>
+                <TableHead className="text-xs">{t("payments.amountPaid")}</TableHead>
+                <TableHead className="text-xs">{t("payments.paymentMethod")}</TableHead>
+                <TableHead className="text-xs">{t("table.status")}</TableHead>
+                <TableHead className="text-xs text-right">{t("payments.receipt")}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {payments.map(p => {
+                const status = paymentStatusLabels[p.status] || paymentStatusLabels.pending;
+                const statusLabel = t(`paymentStatus.${p.status}` as any) || status.label;
+                return (
+                  <TableRow key={p.bookingId + p.createdAt}>
+                    <TableCell className="font-mono text-xs font-medium">{p.bookingId}</TableCell>
+                    <TableCell className="text-xs">{new Date(p.createdAt).toLocaleDateString(dateLocale)}</TableCell>
+                    <TableCell className="text-xs font-semibold text-primary">{p.amount} {p.currency}</TableCell>
+                    <TableCell className="text-xs">{p.method}</TableCell>
+                    <TableCell>
+                      <Badge variant={status.variant} className="text-[10px]">{statusLabel}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {p.status === "paid" ? (
+                        <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-primary">
+                          <Download className="h-3 w-3" /> PDF
+                        </Button>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+    </div>
+  );
+};
 
 // ================= CORPORATE =================
 
 const CorporateContent = ({ active, onNavChange, bookings, payments }: { active: string; onNavChange: (id: string) => void; bookings: Booking[]; payments: Payment[] }) => {
+  const { t } = useLocale();
   if (active === "settings") return null;
   if (active === "notifications") return <NotificationsView onNavChange={onNavChange} />;
 
   const totalSpent = payments.filter(p => p.status === "paid").reduce((s, p) => s + p.amount, 0);
 
-  return (
-    <div>
-      <div className="mb-6 flex items-start gap-3 p-4 bg-accent/10 border border-accent/30 rounded-xl">
-        <AlertCircle className="h-5 w-5 text-accent shrink-0 mt-0.5" />
-        <div>
-          <p className="text-sm font-semibold text-foreground">Veuillez télécharger votre voucher</p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Votre voucher de réservation est disponible. Téléchargez-le pour le présenter lors de votre transfert.
-          </p>
-          <Button size="sm" className="mt-2 gap-1 text-xs" variant="outline">
-            <Download className="h-3 w-3" /> Télécharger le voucher
-          </Button>
-        </div>
-      </div>
+  // Bannière voucher : on cherche la réservation à venir la plus proche dont
+  // le voucher est prêt (payment status = paid). Si rien → pas de bannière.
+  // Le bouton télécharge le voucher de cette réservation précise.
+  const upcomingPaidBooking = bookings
+    .filter(
+      (b) =>
+        b.payment?.status === "paid" &&
+        (b.status === "confirmed" || b.status === "pending" || b.status === "assigned") &&
+        new Date(b.departureAt) >= new Date(),
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.departureAt).getTime() - new Date(b.departureAt).getTime(),
+    )[0];
 
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-8">
-        <button onClick={() => onNavChange("reservations")} className="text-left">
-          <StatCard icon={CalendarDays} label="Total des transferts" value={bookings.length} />
-        </button>
-        <button onClick={() => onNavChange("reservations")} className="text-left">
-          <StatCard icon={TrendingUp} label="Transferts effectués" value={bookings.filter(b => b.status === "completed").length} />
-        </button>
-        <button onClick={() => onNavChange("group")} className="text-left">
-          <StatCard icon={Users} label="Réservations de groupe" value={0} />
-        </button>
-        <button onClick={() => onNavChange("invoices")} className="text-left">
-          <StatCard icon={FileSpreadsheet} label="Total facturé" value={`${totalSpent} TND`} />
-        </button>
-      </div>
-
-      {active === "reservations" && <ReservationsHub bookings={bookings} />}
-      {active === "group" && <GroupBookingView onNavChange={onNavChange} />}
-      {active === "invoices" && <MonthlyInvoicesView />}
-      {active === "payments" && <PaymentsHistory payments={payments} />}
-    </div>
-  );
-};
-
-// ============== GROUP BOOKING ==============
-
-const GroupBookingView = ({ onNavChange }: { onNavChange: (id: string) => void }) => {
-  const navigate = useNavigate();
-  const [passengers, setPassengers] = useState("");
-  const [date, setDate] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-
-  const [submitting, setSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!passengers || !date || !from || !to) {
-      toast({ title: "Champs manquants", description: "Merci de renseigner tous les champs.", variant: "destructive" });
-      return;
-    }
-    const pax = parseInt(passengers, 10);
-    if (!Number.isFinite(pax) || pax < 5) {
-      toast({ title: "Nombre invalide", description: "Une réservation de groupe nécessite au minimum 5 passagers.", variant: "destructive" });
-      return;
-    }
-    const departureAt = new Date(`${date}T08:00:00`);
-    if (Number.isNaN(departureAt.getTime()) || departureAt.getTime() < Date.now() - 60 * 60 * 1000) {
-      toast({ title: "Date invalide", description: "La date doit être dans le futur.", variant: "destructive" });
-      return;
-    }
-    setSubmitting(true);
+  const handleDownloadVoucher = async () => {
+    if (!upcomingPaidBooking) return;
     try {
-      // Choix automatique du véhicule selon nb pax
-      const vehicleId = pax <= 9 ? "van" : pax <= 20 ? "minibus" : pax <= 27 ? "autocar" : "bus";
-      await bookingService.create({
-        departure: from,
-        destination: to,
-        departureAt: departureAt.toISOString(),
-        passengers: pax,
-        vehicles: [{ id: vehicleId, quantity: 1 }],
-        paymentMethod: "card",
-        notes: `Réservation de groupe corporate — ${pax} passagers`,
-      });
+      await bookingService.downloadVoucher(upcomingPaidBooking.id);
       toast({
-        title: "Réservation créée",
-        description: `Transfert de groupe pour ${pax} passagers enregistré. Tu peux la suivre dans tes réservations.`,
+        title: "Voucher téléchargé",
+        description: `Réservation ${upcomingPaidBooking.code ?? upcomingPaidBooking.id.slice(0, 8)}.`,
       });
-      setFrom(""); setTo(""); setDate(""); setPassengers("");
-      onNavChange("reservations");
-    } catch (e) {
-      const err = e as { message?: string };
+    } catch (err) {
+      const e = err as { message?: string };
       toast({
-        title: "Création impossible",
-        description: err.message ?? "Réessaie dans un instant.",
+        title: "Téléchargement impossible",
+        description: e?.message ?? "Réessaie dans un instant.",
         variant: "destructive",
       });
-    } finally {
-      setSubmitting(false);
     }
   };
 
   return (
-    <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-      <div className="p-4 border-b border-border">
-        <h2 className="font-display font-semibold text-foreground flex items-center gap-2">
-          <Users className="h-5 w-5 text-primary" /> Réservation de groupe
-        </h2>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Organisez un transfert pour plusieurs passagers depuis votre dashboard.
-        </p>
-      </div>
-      <div className="p-5 space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Lieu de départ</Label>
-            <Input placeholder="Ex : Aéroport Tunis-Carthage" value={from} onChange={(e) => setFrom(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Destination</Label>
-            <Input placeholder="Ex : Hôtel El Mouradi" value={to} onChange={(e) => setTo(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Date du transfert</Label>
-            <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">Nombre de passagers</Label>
-            <Input type="number" min={2} placeholder="Ex : 12" value={passengers} onChange={(e) => setPassengers(e.target.value)} />
+    <div>
+      {upcomingPaidBooking && (
+        <div className="mb-6 flex items-start gap-3 p-4 bg-accent/10 border border-accent/30 rounded-xl">
+          <AlertCircle className="h-5 w-5 text-accent shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">
+              {t("voucherBanner.title")}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {t("voucherBanner.description", {
+                code: upcomingPaidBooking.code ?? upcomingPaidBooking.id.slice(0, 8),
+                from: upcomingPaidBooking.departure,
+                to: upcomingPaidBooking.destination,
+              })}
+            </p>
+            <Button
+              size="sm"
+              className="mt-2 gap-1 text-xs"
+              variant="outline"
+              onClick={handleDownloadVoucher}
+            >
+              <Download className="h-3 w-3" /> {t("voucherBanner.downloadButton")}
+            </Button>
           </div>
         </div>
-        <div className="flex flex-wrap gap-2 pt-2">
-          <Button onClick={handleSubmit} disabled={submitting} className="bg-primary hover:bg-primary/90 gap-1.5">
-            {submitting ? <CalendarDays className="h-4 w-4 animate-pulse" /> : <PlusCircle className="h-4 w-4" />}
-            {submitting ? "Envoi…" : "Envoyer la demande"}
-          </Button>
-          <Button variant="outline" onClick={() => navigate("/#booking")} className="gap-1.5">
-            Réservation détaillée
-          </Button>
-        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+        <button onClick={() => onNavChange("reservations")} className="text-left">
+          <StatCard icon={CalendarDays} label={t("dashboard.totalTransfers")} value={bookings.length} />
+        </button>
+        <button onClick={() => onNavChange("reservations")} className="text-left">
+          <StatCard icon={TrendingUp} label={t("dashboard.completedTransfers")} value={bookings.filter(b => b.status === "completed").length} />
+        </button>
+        <button onClick={() => onNavChange("invoices")} className="text-left">
+          <StatCard icon={FileSpreadsheet} label={t("dashboard.totalBilled")} value={`${totalSpent} TND`} />
+        </button>
       </div>
+
+      {active === "reservations" && <ReservationsHub bookings={bookings} />}
+      {active === "invoices" && <MonthlyInvoicesView />}
+      {active === "payments" && <PaymentsHistory payments={payments} />}
     </div>
   );
 };
@@ -1038,112 +1033,454 @@ interface NotificationItem {
   reservationId?: string;
 }
 
-const mockNotifications: NotificationItem[] = [
-  {
-    id: "n1",
-    type: "confirmation",
-    title: "Réservation confirmée",
-    message: "Votre transfert RES-001 du 12 mai a été confirmé par le chauffeur.",
-    time: "Il y a 2 h",
-    read: false,
-    target: "reservations",
-    reservationId: "RES-001",
-  },
-  {
-    id: "n2",
-    type: "payment",
-    title: "Paiement reçu",
-    message: "Nous avons bien reçu votre paiement de 85 TND pour la réservation RES-001.",
-    time: "Il y a 3 h",
-    read: false,
-    target: "payments",
-    reservationId: "RES-001",
-  },
-  {
-    id: "n3",
-    type: "voucher",
-    title: "Voucher disponible",
-    message: "Votre voucher de la réservation RES-003 est prêt à être téléchargé.",
-    time: "Hier",
-    read: false,
-    target: "reservations",
-    reservationId: "RES-003",
-  },
-  {
-    id: "n4",
-    type: "reservation",
-    title: "Rappel — Transfert à venir",
-    message: "Votre transfert RES-002 est prévu le 15 mai à 14h30.",
-    time: "Il y a 2 jours",
-    read: true,
-    target: "reservations",
-    reservationId: "RES-002",
-  },
-];
-
-const notifIcons: Record<NotificationType, { icon: typeof Bell; color: string }> = {
+// Icônes selon le type renvoyé par le backend (info / promo / alert / booking / payment / voucher).
+const notifIconByType: Record<string, { icon: typeof Bell; color: string }> = {
+  booking: { icon: CalendarDays, color: "text-primary bg-primary/10" },
   reservation: { icon: CalendarDays, color: "text-primary bg-primary/10" },
   payment: { icon: CreditCard, color: "text-accent bg-accent/10" },
   confirmation: { icon: CheckCircle2, color: "text-green-600 bg-green-100 dark:bg-green-900/30" },
   voucher: { icon: Receipt, color: "text-primary bg-primary/10" },
+  info: { icon: Bell, color: "text-primary bg-primary/10" },
+  promo: { icon: Bell, color: "text-accent bg-accent/10" },
+  alert: { icon: AlertCircle, color: "text-destructive bg-destructive/10" },
+};
+
+const formatRelativeTime = (iso: string) => {
+  const d = new Date(iso);
+  const diff = (Date.now() - d.getTime()) / 1000;
+  if (diff < 60) return "à l'instant";
+  if (diff < 3600) return `il y a ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `il y a ${Math.floor(diff / 3600)} h`;
+  if (diff < 7 * 86400) return `il y a ${Math.floor(diff / 86400)} j`;
+  return d.toLocaleDateString("fr-FR");
 };
 
 const NotificationsView = ({ onNavChange }: { onNavChange: (id: string) => void }) => {
+  const { t } = useLocale();
+  const [items, setItems] = useState<UserNotification[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchAll = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await notificationService.listMine();
+      setItems(data);
+    } catch (e) {
+      const err = e as { message?: string };
+      setError(err.message ?? "Chargement impossible.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void fetchAll(); }, []);
+
+  const markAllRead = async () => {
+    try {
+      await notificationService.markRead();
+      setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+    } catch (e) {
+      const err = e as { message?: string };
+      toast({
+        title: "Action impossible",
+        description: err.message ?? "Réessaie.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleClick = async (n: UserNotification) => {
+    if (!n.read) {
+      try {
+        await notificationService.markRead([n.id]);
+        setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+      } catch {
+        // silencieux
+      }
+    }
+    // Redirige vers l'onglet correspondant selon le type
+    if (n.type === "payment") onNavChange("payments");
+    else onNavChange("reservations");
+  };
+
+  const unreadCount = items.filter((n) => !n.read).length;
+
+  if (loading) {
+    return (
+      <div className="bg-card rounded-2xl border border-border p-8 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card rounded-2xl border border-border p-6 text-sm text-destructive flex items-center gap-2">
+        <AlertCircle className="h-4 w-4" /> {error}
+      </div>
+    );
+  }
+
   return (
     <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
-      <div className="p-4 border-b border-border flex items-center gap-2">
-        <Bell className="h-5 w-5 text-primary" />
-        <div>
-          <h2 className="font-display font-semibold text-foreground">Notifications</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Cliquez sur une notification pour accéder à la section concernée.
-          </p>
+      <div className="p-4 border-b border-border flex items-center justify-between gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Bell className="h-5 w-5 text-primary" />
+          <div>
+            <h2 className="font-display font-semibold text-foreground">{t("notifications.title")}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {t("notifications.subtitle")}
+            </p>
+          </div>
         </div>
+        {unreadCount > 0 && (
+          <Button size="sm" variant="outline" onClick={markAllRead}>
+            {t("notifications.markAllRead")}
+          </Button>
+        )}
       </div>
-      <ul className="divide-y divide-border">
-        {mockNotifications.map((n) => {
-          const cfg = notifIcons[n.type];
-          const Icon = cfg.icon;
-          return (
-            <li key={n.id}>
-              <button
-                onClick={() => onNavChange(n.target)}
-                className="w-full text-left flex items-start gap-3 p-4 hover:bg-muted/60 transition-colors"
-              >
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${cfg.color}`}>
-                  <Icon className="h-5 w-5" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-foreground truncate">{n.title}</p>
-                    {!n.read && <span className="w-2 h-2 rounded-full bg-accent shrink-0" />}
+      {items.length === 0 ? (
+        <div className="p-12 text-center text-sm text-muted-foreground">
+          {t("notifications.empty")}
+        </div>
+      ) : (
+        <ul className="divide-y divide-border">
+          {items.map((n) => {
+            const cfg = notifIconByType[n.type] || notifIconByType.info;
+            const Icon = cfg.icon;
+            return (
+              <li key={n.id}>
+                <button
+                  onClick={() => handleClick(n)}
+                  className="w-full text-left flex items-start gap-3 p-4 hover:bg-muted/60 transition-colors"
+                >
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${cfg.color}`}>
+                    <Icon className="h-5 w-5" />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
-                  <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-muted-foreground">
-                    <Clock className="h-3 w-3" />
-                    <span>{n.time}</span>
-                    {n.reservationId && (
-                      <>
-                        <span>•</span>
-                        <span className="font-mono">{n.reservationId}</span>
-                      </>
-                    )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-foreground truncate">{n.title}</p>
+                      {!n.read && <span className="w-2 h-2 rounded-full bg-accent shrink-0" />}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.body}</p>
+                    <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-muted-foreground">
+                      <Clock className="h-3 w-3" />
+                      <span>{formatRelativeTime(n.createdAt)}</span>
+                      {n.bookingId && (
+                        <>
+                          <span>•</span>
+                          <span className="font-mono">{n.bookingId.slice(0, 8)}</span>
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 };
 
-const SettingsContent = () => (
-  <div className="bg-card rounded-2xl border border-border p-8">
-    <h2 className="font-display text-xl font-bold text-foreground mb-2">⚙ Paramètres du compte</h2>
-    <p className="text-muted-foreground">Les paramètres de votre compte seront disponibles prochainement.</p>
-  </div>
-);
+/* ---------- Paramètres du compte (panneau fonctionnel) ---------- */
+
+export const SettingsContent = () => {
+  const { user, refresh } = useAuth();
+  const { themeMode: ctxThemeMode, setThemeMode } = useTheme();
+  const { locale: ctxLocale, setLocale, t } = useLocale();
+  const [profile, setProfile] = useState({
+    fullName: user?.fullName || user?.full_name || "",
+    email: user?.email || "",
+    phone: user?.phone || "",
+    address: user?.address || "",
+  });
+  const [preferences, setPreferences] = useState({
+    locale: ctxLocale,
+    themeMode: ctxThemeMode,
+  });
+  const [pwd, setPwd] = useState({ current: "", next: "", confirm: "" });
+  const [showPwd, setShowPwd] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  const [savingPwd, setSavingPwd] = useState(false);
+
+  // Resync local state si user change (après refresh par exemple)
+  useEffect(() => {
+    if (!user) return;
+    setProfile({
+      fullName: user.fullName || user.full_name || "",
+      email: user.email || "",
+      phone: user.phone || "",
+      address: user.address || "",
+    });
+    setPreferences({
+      locale: (user as any).locale || "fr",
+      themeMode: (user as any).themeMode || "system",
+    });
+  }, [user]);
+
+  const handleSaveProfile = async () => {
+    setSavingProfile(true);
+    try {
+      await authService.updateProfile({
+        fullName: profile.fullName.trim() || undefined,
+        email: profile.email.trim().toLowerCase() || undefined,
+        phone: profile.phone.trim() || undefined,
+        address: profile.address.trim() || undefined,
+      });
+      await refresh();
+      toast({ title: "Profil mis à jour", description: "Vos informations ont été enregistrées." });
+    } catch (err: any) {
+      toast({
+        title: "Échec de la mise à jour",
+        description: err?.data?.message || err?.message || "Réessaie dans un instant.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  const handleSavePreferences = async () => {
+    setSavingPrefs(true);
+    try {
+      await authService.updatePreferences(preferences);
+      await refresh();
+      toast({ title: "Préférences enregistrées", description: "Tes choix ont été pris en compte." });
+    } catch (err: any) {
+      toast({
+        title: "Échec",
+        description: err?.data?.message || err?.message || "Réessaie.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingPrefs(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (pwd.next.length < 8) {
+      toast({
+        title: "Mot de passe trop court",
+        description: "Au moins 8 caractères.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (pwd.next !== pwd.confirm) {
+      toast({
+        title: "Confirmation incorrecte",
+        description: "Les deux mots de passe doivent être identiques.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setSavingPwd(true);
+    try {
+      await authService.changePassword(pwd.current, pwd.next);
+      setPwd({ current: "", next: "", confirm: "" });
+      toast({ title: "Mot de passe modifié", description: "Tu peux maintenant te connecter avec le nouveau." });
+    } catch (err: any) {
+      toast({
+        title: "Échec du changement",
+        description: err?.data?.message || err?.message || "Vérifie ton ancien mot de passe.",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingPwd(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      {/* En-tête */}
+      <div>
+        <h2 className="font-display text-2xl font-bold text-foreground mb-1">{t("settings.title")}</h2>
+        <p className="text-sm text-muted-foreground">{t("settings.subtitle")}</p>
+      </div>
+
+      {/* Profil */}
+      <div className="bg-card rounded-2xl border border-border p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <User className="h-5 w-5 text-primary" />
+          <h3 className="font-display font-semibold text-foreground">{t("settings.sections.personalInfo")}</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.fullName")}</label>
+            <input
+              type="text"
+              value={profile.fullName}
+              onChange={(e) => setProfile({ ...profile, fullName: e.target.value })}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.email")}</label>
+            <input
+              type="email"
+              value={profile.email}
+              onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.phone")}</label>
+            <input
+              type="tel"
+              value={profile.phone}
+              onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+              placeholder="+216 XX XXX XXX"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.address")}</label>
+            <input
+              type="text"
+              value={profile.address}
+              onChange={(e) => setProfile({ ...profile, address: e.target.value })}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={handleSaveProfile} disabled={savingProfile} className="gap-2">
+            {savingProfile ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            {t("settings.saveChanges")}
+          </Button>
+        </div>
+      </div>
+
+      {/* Mot de passe */}
+      <div className="bg-card rounded-2xl border border-border p-6 space-y-4">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-2">
+            <Lock className="h-5 w-5 text-primary" />
+            <h3 className="font-display font-semibold text-foreground">{t("settings.sections.changePassword")}</h3>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowPwd((v) => !v)}
+            className="text-xs gap-1.5"
+          >
+            {showPwd ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+            {showPwd ? t("settings.hide") : t("settings.show")}
+          </Button>
+        </div>
+        <div className="grid grid-cols-1 gap-4">
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.currentPassword")}</label>
+            <input
+              type={showPwd ? "text" : "password"}
+              value={pwd.current}
+              onChange={(e) => setPwd({ ...pwd, current: e.target.value })}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+              placeholder="••••••••"
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.newPassword")}</label>
+              <input
+                type={showPwd ? "text" : "password"}
+                value={pwd.next}
+                onChange={(e) => setPwd({ ...pwd, next: e.target.value })}
+                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder={t("settings.passwordMinChars")}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.confirmPassword")}</label>
+              <input
+                type={showPwd ? "text" : "password"}
+                value={pwd.confirm}
+                onChange={(e) => setPwd({ ...pwd, confirm: e.target.value })}
+                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder={t("settings.repeatNew")}
+              />
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Button
+            onClick={handleChangePassword}
+            disabled={savingPwd || !pwd.current || !pwd.next}
+            className="gap-2"
+          >
+            {savingPwd ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />}
+            {t("settings.changePasswordBtn")}
+          </Button>
+        </div>
+      </div>
+
+      {/* Préférences */}
+      <div className="bg-card rounded-2xl border border-border p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <Cog className="h-5 w-5 text-primary" />
+          <h3 className="font-display font-semibold text-foreground">{t("settings.sections.preferences")}</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.language")}</label>
+            <select
+              value={preferences.locale}
+              onChange={(e) => {
+                const next = e.target.value as "fr" | "en" | "es";
+                // Applique la langue IMMÉDIATEMENT à toute l'UI
+                setLocale(next);
+                setPreferences({ ...preferences, locale: next });
+              }}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="fr">Français</option>
+              <option value="en">English</option>
+              <option value="es">Español</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-foreground mb-1.5 block">{t("settings.fields.theme")}</label>
+            <select
+              value={preferences.themeMode}
+              onChange={(e) => {
+                const next = e.target.value as ThemeMode;
+                // Applique le thème IMMÉDIATEMENT à toute l'UI
+                setThemeMode(next);
+                setPreferences({ ...preferences, themeMode: next });
+              }}
+              className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="system">{t("settings.themes.system")}</option>
+              <option value="light">{t("settings.themes.light")}</option>
+              <option value="dark">{t("settings.themes.dark")}</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Button onClick={handleSavePreferences} disabled={savingPrefs} className="gap-2">
+            {savingPrefs ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+            {t("settings.savePrefs")}
+          </Button>
+        </div>
+      </div>
+
+      {/* Infos compte */}
+      <div className="bg-muted/40 rounded-2xl border border-border p-4 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 mb-1">
+          <Info className="h-3.5 w-3.5" />
+          <span className="font-semibold">{t("settings.sections.aboutAccount")}</span>
+        </div>
+        <p>{t("settings.fields.userId")} : <span className="font-mono">{user?.id ?? "—"}</span></p>
+        <p>{t("settings.fields.role")} : {user?.role || "—"}</p>
+        {user?.account_status && <p>{t("settings.fields.accountStatus")} : {user.account_status}</p>}
+      </div>
+    </div>
+  );
+};
 
 export default DashboardPage;

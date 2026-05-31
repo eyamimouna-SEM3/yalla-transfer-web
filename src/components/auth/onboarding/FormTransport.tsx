@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ArrowLeft, ArrowRight, Truck, Upload, CheckCircle2, Clock, ShieldCheck } from "lucide-react";
 import { authService } from "@/services/authService";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -56,6 +57,7 @@ const UploadField = ({ label, required, value, onChange }: { label: string; requ
 
 const FormTransport = ({ name, email, password, onBack }: Props) => {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [form, setForm] = useState({
     raisonSociale: name,
     matriculeFiscal: "",
@@ -171,6 +173,7 @@ const FormTransport = ({ name, email, password, onBack }: Props) => {
         patent: patent || undefined,
         civilLiabilityInsurance: civilLiabilityInsurance || undefined,
       });
+      await refresh();
       setSuccess(true);
     } catch (error) {
       console.error("Registration error:", error);

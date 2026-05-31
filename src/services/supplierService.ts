@@ -69,11 +69,25 @@ export const supplierService = {
     return api.get<SupplierFleetDriver[]>("/supplier/fleet/drivers");
   },
 
-  /** Assigne un chauffeur à une réservation. */
+  /**
+   * Assigne un chauffeur à une réservation. Le backend extrait `driverUserId`
+   * du body (POST /supplier/bookings/:bookingId/assign-driver), il faut donc
+   * envoyer cette clé exacte sinon le serveur reçoit `undefined`.
+   */
   async assignDriver(bookingId: string, driverId: string) {
     return api.post<{ bookingId: string; assignedDriverId: string; status: string }>(
       `/supplier/bookings/${bookingId}/assign-driver`,
-      { driverId },
+      { driverUserId: driverId },
+    );
+  },
+
+  /**
+   * Le fournisseur accepte une nouvelle réservation (status pending).
+   * Passe en status="confirmed" et rattache le booking au supplier.
+   */
+  async acceptBooking(bookingId: string) {
+    return api.post<{ id: string; status: string }>(
+      `/supplier/bookings/${bookingId}/accept`,
     );
   },
 
@@ -107,6 +121,21 @@ export const supplierService = {
 
   async removeDriver(id: string): Promise<{ ok: boolean }> {
     return api.delete<{ ok: boolean }>(`/supplier/drivers/${id}`);
+  },
+
+  /**
+   * Bannit le chauffeur — son `accountStatus` passe à "suspended" côté
+   * backend ce qui bloque immédiatement toute requête authentifiée (web et
+   * mobile), force `driverOnline=false` et dépose une notification.
+   * Le chauffeur sera déconnecté à sa prochaine requête.
+   */
+  async banDriver(id: string): Promise<SupplierFleetDriver> {
+    return api.post<SupplierFleetDriver>(`/supplier/drivers/${id}/ban`, {});
+  },
+
+  /** Lève la suspension du chauffeur — `accountStatus` repasse à "active". */
+  async unbanDriver(id: string): Promise<SupplierFleetDriver> {
+    return api.post<SupplierFleetDriver>(`/supplier/drivers/${id}/unban`, {});
   },
 };
 

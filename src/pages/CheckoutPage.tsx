@@ -4,15 +4,18 @@ import { fr } from "date-fns/locale";
 import Header from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft, MapPin, Calendar, Clock, Users, CreditCard, Building2, Mail, CheckCircle2, Upload, ArrowRight, User, Briefcase, Shield, Banknote, Download, AlertCircle, Wallet, IdCard, Smartphone, Lock } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { vehicleTypes } from "@/data/vehicleTypes";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import WhatsAppInput, { COUNTRIES, Country } from "@/components/WhatsAppInput";
 import SecurePaymentDialog, { type PaymentMethodKind } from "@/components/checkout/SecurePaymentDialog";
 import { bookingService } from "@/services/bookingService";
 import { pendingBookingStorage } from "@/utils/pendingBooking";
 import { tokenStorage } from "@/utils/tokenStorage";
 import { cn } from "@/lib/utils";
+import { validators } from "@/utils/validators";
+import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth";
 
 const steps = [
   { label: "Résumé", num: 1 },
@@ -31,6 +34,7 @@ interface CartItem {
 const CheckoutPage = () => {
   const [params] = useSearchParams();
   const navigate = useNavigate();
+  const { user: authUser } = useAuth();
   const [paymentMethod, setPaymentMethod] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState(1);
   const [showPostPayment, setShowPostPayment] = useState(false);
@@ -44,6 +48,18 @@ const CheckoutPage = () => {
     phone: "",
     email: "",
   });
+
+  // Pré-remplit les infos passager avec celles de l'utilisateur connecté
+  // (nom, email, téléphone) pour lui éviter de tout retaper.
+  useEffect(() => {
+    if (authUser) {
+      setFormData((prev) => ({
+        fullName: prev.fullName || authUser.fullName || authUser.full_name || "",
+        email: prev.email || authUser.email || "",
+        phone: prev.phone || authUser.phone || "",
+      }));
+    }
+  }, [authUser]);
   const [country, setCountry] = useState<Country>(COUNTRIES[0]); // Tunisie par défaut
 
   const from = params.get("from") || "";
@@ -188,6 +204,39 @@ const CheckoutPage = () => {
       setShowPostPayment(true);
       return;
     }
+
+    // Validation côté CheckoutPage : tout doit être saisi ici (carte + email).
+    // Comme ça quand on ouvre le dialog, il passe directement à l'OTP sans
+    // jamais réafficher de formulaire.
+    if (paymentMethod === "card" || paymentMethod === "clicktopay") {
+      const checks: Array<{ key: string; err: string | null }> = [
+        { key: "holder", err: validators.fullName(cardData.holder) },
+        { key: "cardNumber", err: validators.cardNumber(cardData.number) },
+        { key: "expiry", err: validators.expiry(cardData.expiry, date) },
+        { key: "cvv", err: validators.cvv(cardData.cvc) },
+        { key: "email", err: validators.email(formData.email) },
+      ];
+      const firstError = checks.find((c) => c.err);
+      if (firstError) {
+        toast({
+          title: "Informations de paiement invalides",
+          description: firstError.err!,
+          variant: "destructive",
+        });
+        return;
+      }
+    } else if (paymentMethod === "edinar" || paymentMethod === "wallet") {
+      const emailErr = validators.email(formData.email);
+      if (emailErr) {
+        toast({
+          title: "Email requis",
+          description: "Saisissez un email valide pour recevoir le code de vérification.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setShowSecurePayment(true);
   };
 
@@ -214,9 +263,17 @@ const CheckoutPage = () => {
     setIdUploaded(true);
   };
 
-  // Parcours léger post-réservation : mot de passe → choix du type de client → dashboard.
-  // Le client ne doit PAS revoir le formulaire complet d'inscription.
+  // Parcours post-réservation :
+  // - Utilisateur DÉJÀ connecté → redirection directe vers son dashboard
+  //   (ou /admin si admin). Pas de revérification d'email ni d'inscription.
+  // - Utilisateur invité (guest checkout) → parcours léger d'inscription
+  //   (création du mot de passe puis choix du type de client).
   const handleGoToDashboard = () => {
+    if (authUser) {
+      const path = authUser.role === "admin" ? "/admin" : "/dashboard";
+      navigate(path);
+      return;
+    }
     navigate(
       `/inscription?quickfinalize=1&name=${encodeURIComponent(formData.fullName || "Client")}&email=${encodeURIComponent(formData.email || "")}`
     );
@@ -376,6 +433,33 @@ const CheckoutPage = () => {
                 ))}
               </div>
 
+              {/* Email commun à TOUTES les méthodes de paiement en ligne
+                  (wallet, e-Dinar, carte). Sert à recevoir le code OTP de
+                  vérification et le voucher PDF. Pas affiché pour cash/bank
+                  qui n'utilisent pas la vérification email. */}
+              {paymentMethod &&
+                paymentMethod !== "cash" &&
+                paymentMethod !== "bank" && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold text-foreground">
+                      Email pour recevoir le code de vérification
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) => setFormData(p => ({ ...p, email: e.target.value }))}
+                        className="w-full px-3 py-2.5 pl-10 bg-muted/50 rounded-xl border border-border text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground"
+                        placeholder="votre@email.com"
+                      />
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Un code à 6 chiffres sera envoyé à cette adresse pour confirmer le paiement.
+                    </p>
+                  </div>
+                )}
+
               {showCardForm && (
                 <div className="space-y-3 animate-in fade-in-0 slide-in-from-top-2 duration-200">
                   <div className="flex items-center gap-2 text-xs font-semibold text-primary bg-primary/5 border border-primary/20 rounded-lg px-3 py-2">
@@ -490,7 +574,9 @@ const CheckoutPage = () => {
         </div>
       </div>
 
-      {/* Secure payment with email OTP — applies to all online methods */}
+      {/* Secure payment with email OTP — applies to all online methods.
+          On passe les données déjà saisies dans CheckoutPage pour éviter la
+          double saisie. Le dialog les utilise et passe directement à l'OTP. */}
       <SecurePaymentDialog
         open={showSecurePayment}
         onOpenChange={setShowSecurePayment}
@@ -499,6 +585,13 @@ const CheckoutPage = () => {
         currency="DT"
         onSuccess={handleSecurePaymentSuccess}
         transferDate={date}
+        prefilledData={{
+          holder: cardData.holder,
+          cardNumber: cardData.number,
+          expiry: cardData.expiry,
+          cvv: cardData.cvc,
+          email: formData.email,
+        }}
       />
 
       {/* Post-payment dialog */}
@@ -508,6 +601,11 @@ const CheckoutPage = () => {
             <DialogTitle className="font-display">
               {idUploaded ? "Voucher disponible !" : "Réservation acceptée !"}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              {idUploaded
+                ? "Ton voucher PDF est prêt à être téléchargé."
+                : "Confirme tes informations de passager pour finaliser ta réservation."}
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 mt-2">
@@ -567,7 +665,9 @@ const CheckoutPage = () => {
                   onClick={handleGoToDashboard}
                   className="w-full text-center text-xs text-muted-foreground hover:text-primary transition-colors underline"
                 >
-                  Je le ferai plus tard → Créer mon mot de passe
+                  {authUser
+                    ? "Je le ferai plus tard → Aller à mon dashboard"
+                    : "Je le ferai plus tard → Créer mon mot de passe"}
                 </button>
               </>
             ) : (

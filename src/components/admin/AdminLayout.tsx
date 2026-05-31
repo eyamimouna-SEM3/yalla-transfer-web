@@ -16,6 +16,17 @@ import {
   ChevronRight,
   Menu,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useAuth } from "@/hooks/useAuth";
 
 interface NavItem {
   icon: React.ElementType;
@@ -36,8 +47,18 @@ const navItems: NavItem[] = [
 const AdminLayout = ({ children }: { children: React.ReactNode }) => {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const location = useLocation();
   const navigate = useNavigate();
+  const { signOut } = useAuth();
+
+  // Déconnexion effective : purge token + user du localStorage, déconnecte
+  // les sockets temps réel, puis retour à la home publique.
+  const handleConfirmLogout = async () => {
+    await signOut();
+    setLogoutOpen(false);
+    navigate("/");
+  };
 
   const isActive = (path: string) => {
     if (path === "/admin") return location.pathname === "/admin";
@@ -96,7 +117,7 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
           {!collapsed && <span>Paramètres</span>}
         </Link>
         <button
-          onClick={() => navigate("/")}
+          onClick={() => setLogoutOpen(true)}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
         >
           <LogOut className="h-5 w-5 shrink-0" />
@@ -173,6 +194,32 @@ const AdminLayout = ({ children }: { children: React.ReactNode }) => {
 
         <div className="p-4 lg:p-6 max-w-[1400px]">{children}</div>
       </main>
+
+      {/* Dialog de confirmation de déconnexion : ouvert au clic sur le
+          bouton "Déconnexion" de la sidebar admin. Évite les déconnexions
+          accidentelles et purge proprement la session avant redirection. */}
+      <AlertDialog open={logoutOpen} onOpenChange={setLogoutOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <LogOut className="h-5 w-5 text-destructive" />
+              Voulez-vous vraiment vous déconnecter ?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Vous serez redirigé vers la page d'accueil et devrez vous reconnecter pour accéder à l'espace administrateur.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmLogout}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Se déconnecter
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

@@ -143,4 +143,16 @@ export const bookingService = {
     const res = await api.get<{ url: string }>(`/bookings/${bookingId}/voucher/public`);
     return res.url;
   },
+
+  /**
+   * Annule une réservation. Le client / supplier / admin peuvent appeler cet
+   * endpoint. Le backend applique les règles (statut compatible + > 1h avant
+   * départ pour les non-admins).
+   */
+  async cancelBooking(bookingId: string, reason?: string) {
+    return api.post<{ id: string; status: string; message: string }>(
+      `/bookings/${bookingId}/cancel`,
+      reason && reason.trim() ? { reason: reason.trim() } : {},
+    );
+  },
 };

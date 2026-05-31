@@ -10,7 +10,19 @@ import {
   Bell,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import type { ProfileType } from "@/pages/AuthPage";
+import { useLocale } from "@/hooks/useLocale";
+import { useAuth } from "@/hooks/useAuth";
 
 export interface NavItem {
   icon: React.ElementType;
@@ -26,13 +38,16 @@ interface Props {
   activeItem: string;
   onNavChange: (id: string) => void;
   children: React.ReactNode;
+  /** Nombre de notifications non lues à afficher sur la cloche du header. */
+  unreadNotifications?: number;
 }
 
-const profileLabels: Record<string, string> = {
-  particulier: "Client Particulier",
-  corporate: "Client Corporate",
-  transport: "Société de Transport",
-  chauffeur: "Chauffeur Indépendant",
+// Clés i18n pour les libellés de rôle (résolues par `t()` au rendu).
+const profileLabelKeys: Record<string, string> = {
+  particulier: "roles.client_b2c",
+  corporate: "roles.client_b2b",
+  transport: "roles.supplier",
+  chauffeur: "roles.driver_independent",
 };
 
 const DashboardLayout = ({
@@ -42,9 +57,21 @@ const DashboardLayout = ({
   activeItem,
   onNavChange,
   children,
+  unreadNotifications = 0,
 }: Props) => {
   const [collapsed, setCollapsed] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
   const navigate = useNavigate();
+  const { t } = useLocale();
+  const { signOut } = useAuth();
+
+  // Déconnexion effective : purge le token/user du localStorage, déconnecte
+  // les sockets temps réel, puis ramène l'utilisateur sur la home publique.
+  const handleConfirmLogout = async () => {
+    await signOut();
+    setLogoutOpen(false);
+    navigate("/");
+  };
 
   return (
     <div className="min-h-screen flex bg-muted/50">
@@ -81,7 +108,7 @@ const DashboardLayout = ({
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-foreground truncate">{userName}</p>
                 <p className="text-xs text-muted-foreground truncate">
-                  {profileLabels[profile || "particulier"]}
+                  {t(profileLabelKeys[profile || "particulier"])}
                 </p>
               </div>
             )}
@@ -124,14 +151,14 @@ const DashboardLayout = ({
             )}
           >
             <Settings className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>Paramètres</span>}
+            {!collapsed && <span>{t("common.settings")}</span>}
           </button>
           <button
-            onClick={() => navigate("/")}
+            onClick={() => setLogoutOpen(true)}
             className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-all"
           >
             <LogOut className="h-5 w-5 shrink-0" />
-            {!collapsed && <span>Déconnexion</span>}
+            {!collapsed && <span>{t("common.logout")}</span>}
           </button>
         </div>
 
@@ -157,7 +184,7 @@ const DashboardLayout = ({
               <Search className="h-4 w-4 text-muted-foreground" />
               <input
                 type="text"
-                placeholder="Rechercher..."
+                placeholder={t("common.searchPlaceholder")}
                 className="bg-transparent text-sm focus:outline-none w-full text-foreground placeholder:text-muted-foreground"
               />
             </div>
@@ -169,9 +196,11 @@ const DashboardLayout = ({
               aria-label="Voir les notifications"
             >
               <Bell className="h-4 w-4 text-muted-foreground" />
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-accent text-accent-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
-                3
-              </span>
+              {unreadNotifications > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-accent text-accent-foreground text-[10px] font-bold rounded-full flex items-center justify-center">
+                  {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                </span>
+              )}
             </button>
             <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center">
               <span className="text-primary font-semibold text-xs">
@@ -183,6 +212,33 @@ const DashboardLayout = ({
 
         <div className="p-6 lg:p-8 max-w-6xl">{children}</div>
       </main>
+
+      {/* Dialog de confirmation de déconnexion : affiché au clic sur le
+          bouton "Déconnexion" de la sidebar. Évite les déconnexions
+          accidentelles et purge proprement la session (token + sockets)
+          avant la redirection vers la home. */}
+      <AlertDialog open={logoutOpen} onOpenChange={setLogoutOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <LogOut className="h-5 w-5 text-destructive" />
+              Voulez-vous vraiment vous déconnecter ?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Vous serez redirigé vers la page d'accueil et devrez vous reconnecter pour accéder à votre espace.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmLogout}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Se déconnecter
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

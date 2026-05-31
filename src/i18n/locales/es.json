@@ -1,0 +1,186 @@
+{
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "confirm": "Confirmar",
+    "loading": "Cargando…",
+    "search": "Buscar…",
+    "back": "Volver",
+    "next": "Continuar",
+    "yes": "Sí",
+    "no": "No",
+    "all": "Todos",
+    "actions": "Acciones",
+    "status": "Estado",
+    "date": "Fecha",
+    "time": "Hora",
+    "amount": "Importe",
+    "details": "Detalles",
+    "view": "Ver",
+    "download": "Descargar",
+    "send": "Enviar",
+    "logout": "Cerrar sesión",
+    "settings": "Configuración",
+    "notifications": "Notificaciones",
+    "welcome": "Bienvenido",
+    "tryAgain": "Reintentar",
+    "error": "Error",
+    "success": "Éxito",
+    "required": "Obligatorio",
+    "optional": "Opcional",
+    "noData": "Sin datos",
+    "total": "Total",
+    "searchPlaceholder": "Buscar..."
+  },
+  "table": {
+    "id": "ID",
+    "date": "Fecha",
+    "time": "Hora",
+    "trip": "Trayecto",
+    "vehicle": "Vehículo",
+    "price": "Tarifa",
+    "status": "Estado",
+    "actions": "Acciones",
+    "code": "Código",
+    "amount": "Importe",
+    "period": "Período",
+    "paymentStatus": "Estado pago"
+  },
+  "bookingStatus": {
+    "pending": "Esperando al proveedor",
+    "confirmed": "Confirmada",
+    "assigned": "Conductor asignado",
+    "driver_en_route": "Conductor en camino",
+    "arrived": "Conductor llegó",
+    "in_progress": "En curso",
+    "ongoing": "En curso",
+    "completed": "Finalizada",
+    "cancelled": "Cancelada"
+  },
+  "paymentStatus": {
+    "paid": "Pagado",
+    "pending": "Pendiente",
+    "refunded": "Reembolsado",
+    "failed": "Fallido"
+  },
+  "payments": {
+    "title": "Historial de pagos",
+    "subtitle": "Todos sus pagos efectuados con el detalle de cada transacción.",
+    "empty": "Ningún pago registrado.",
+    "bookingId": "ID Reserva",
+    "amountPaid": "Importe pagado",
+    "paymentMethod": "Método de pago",
+    "receipt": "Recibo"
+  },
+  "header": {
+    "about": "Acerca de",
+    "ourApp": "Nuestra app",
+    "partners": "Nuestros partners",
+    "contact": "Contacto",
+    "login": "Iniciar sesión",
+    "register": "Registrarse",
+    "myDashboard": "Ir a mi panel"
+  },
+  "roles": {
+    "admin": "Administrador",
+    "supplier": "Empresa de transporte",
+    "driver_independent": "Conductor independiente",
+    "client_b2b": "Cliente corporativo",
+    "client_b2c": "Cliente particular",
+    "user": "Usuario"
+  },
+  "dashboard": {
+    "welcome": "Bienvenido, {{name}}",
+    "subtitle": "Tu espacio personal para gestionar tus reservas y pagos fácilmente.",
+    "myReservations": "Mis reservas",
+    "paymentsHistory": "Historial de pagos",
+    "monthlyInvoices": "Facturación mensual",
+    "vehicleManagement": "Gestión de vehículos",
+    "driverManagement": "Gestión de conductores",
+    "reservationsList": "Lista de reservas",
+    "revenue": "Ingresos",
+    "revenueAndStats": "Ingresos y estadísticas",
+    "ratings": "Evaluaciones",
+    "qualityRatings": "Calidad y opiniones",
+    "totalTransfers": "Total de transferencias",
+    "completedTransfers": "Transferencias completadas",
+    "totalBilled": "Total facturado",
+    "newReservation": "Nueva reserva",
+    "tabs": {
+      "pending": "Pendientes",
+      "inProgress": "En curso",
+      "completed": "Finalizadas"
+    },
+    "empty": {
+      "pending": "No hay reservas pendientes.",
+      "inProgress": "No hay reservas en curso.",
+      "completed": "No hay reservas finalizadas."
+    },
+    "actions": {
+      "cancel": "Cancelar",
+      "downloadPdf": "Descargar voucher PDF"
+    },
+    "cancelHint": "Puedes cancelar una reserva mientras la transferencia no haya comenzado."
+  },
+  "voucherBanner": {
+    "title": "Voucher disponible para tu próxima transferencia",
+    "description": "Reserva {{code}} — {{from}} → {{to}}. Descárgalo para presentarlo durante tu transferencia.",
+    "downloadButton": "Descargar voucher"
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "subtitle": "Haz clic en una notificación para acceder a la sección correspondiente.",
+    "markAllRead": "Marcar todo como leído",
+    "empty": "Aún no hay notificaciones.",
+    "timeAgo": {
+      "now": "ahora mismo",
+      "min": "hace {{count}} min",
+      "hour": "hace {{count}} h",
+      "day": "hace {{count}} d"
+    }
+  },
+  "settings": {
+    "title": "Configuración de la cuenta",
+    "subtitle": "Gestiona tu información personal, contraseña y preferencias.",
+    "sections": {
+      "personalInfo": "Información personal",
+      "changePassword": "Cambiar contraseña",
+      "preferences": "Preferencias",
+      "aboutAccount": "Acerca de tu cuenta"
+    },
+    "fields": {
+      "fullName": "Nombre completo",
+      "email": "Email",
+      "phone": "Teléfono",
+      "address": "Dirección",
+      "currentPassword": "Contraseña actual",
+      "newPassword": "Nueva contraseña",
+      "confirmPassword": "Confirmar",
+      "language": "Idioma",
+      "theme": "Tema",
+      "userId": "ID de usuario",
+      "role": "Rol",
+      "accountStatus": "Estado de la cuenta"
+    },
+    "themes": {
+      "system": "Seguir sistema",
+      "light": "Claro",
+      "dark": "Oscuro"
+    },
+    "passwordMinChars": "Mín. 8 caracteres",
+    "repeatNew": "Repite la nueva",
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "saveChanges": "Guardar cambios",
+    "changePasswordBtn": "Cambiar contraseña",
+    "savePrefs": "Guardar"
+  },
+  "auth": {
+    "alreadyLoggedIn": "Ya estás conectado como {{name}}. Redirigiendo a tu espacio…",
+    "redirecting": "Redirigiendo a tu espacio…",
+    "loading": "Cargando…"
+  }
+}

@@ -1,0 +1,186 @@
+{
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "confirm": "Confirmer",
+    "loading": "Chargement…",
+    "search": "Rechercher…",
+    "back": "Retour",
+    "next": "Continuer",
+    "yes": "Oui",
+    "no": "Non",
+    "all": "Tous",
+    "actions": "Actions",
+    "status": "Statut",
+    "date": "Date",
+    "time": "Heure",
+    "amount": "Montant",
+    "details": "Détails",
+    "view": "Voir",
+    "download": "Télécharger",
+    "send": "Envoyer",
+    "logout": "Déconnexion",
+    "settings": "Paramètres",
+    "notifications": "Notifications",
+    "welcome": "Bienvenue",
+    "tryAgain": "Réessayer",
+    "error": "Erreur",
+    "success": "Succès",
+    "required": "Obligatoire",
+    "optional": "Facultatif",
+    "noData": "Aucune donnée",
+    "total": "Total",
+    "searchPlaceholder": "Rechercher..."
+  },
+  "table": {
+    "id": "ID",
+    "date": "Date",
+    "time": "Heure",
+    "trip": "Trajet",
+    "vehicle": "Véhicule",
+    "price": "Tarif",
+    "status": "Statut",
+    "actions": "Actions",
+    "code": "Code",
+    "amount": "Montant",
+    "period": "Période",
+    "paymentStatus": "Statut paiement"
+  },
+  "bookingStatus": {
+    "pending": "En attente du fournisseur",
+    "confirmed": "Confirmée",
+    "assigned": "Chauffeur assigné",
+    "driver_en_route": "Chauffeur en route",
+    "arrived": "Chauffeur arrivé",
+    "in_progress": "En cours",
+    "ongoing": "En cours",
+    "completed": "Terminée",
+    "cancelled": "Annulée"
+  },
+  "paymentStatus": {
+    "paid": "Payé",
+    "pending": "En attente",
+    "refunded": "Remboursé",
+    "failed": "Échoué"
+  },
+  "payments": {
+    "title": "Historique des paiements",
+    "subtitle": "Tous vos paiements effectués avec le détail de chaque transaction.",
+    "empty": "Aucun paiement enregistré.",
+    "bookingId": "ID Réservation",
+    "amountPaid": "Montant payé",
+    "paymentMethod": "Mode de paiement",
+    "receipt": "Reçu"
+  },
+  "header": {
+    "about": "À propos",
+    "ourApp": "Notre App",
+    "partners": "Nos partenaires",
+    "contact": "Contact",
+    "login": "Connexion",
+    "register": "S'inscrire",
+    "myDashboard": "Accéder à mon dashboard"
+  },
+  "roles": {
+    "admin": "Administrateur",
+    "supplier": "Société de transport",
+    "driver_independent": "Chauffeur indépendant",
+    "client_b2b": "Client corporate",
+    "client_b2c": "Client particulier",
+    "user": "Utilisateur"
+  },
+  "dashboard": {
+    "welcome": "Bienvenue, {{name}}",
+    "subtitle": "Votre espace personnel vous permet de gérer vos réservations et vos paiements en toute simplicité.",
+    "myReservations": "Mes réservations",
+    "paymentsHistory": "Historique des paiements",
+    "monthlyInvoices": "Facturation mensuelle",
+    "vehicleManagement": "Gestion des véhicules",
+    "driverManagement": "Gestion des chauffeurs",
+    "reservationsList": "Liste des réservations",
+    "revenue": "Revenus",
+    "revenueAndStats": "Revenus & statistiques",
+    "ratings": "Évaluations",
+    "qualityRatings": "Qualité & avis",
+    "totalTransfers": "Total des transferts",
+    "completedTransfers": "Transferts effectués",
+    "totalBilled": "Total facturé",
+    "newReservation": "Nouvelle réservation",
+    "tabs": {
+      "pending": "En attente",
+      "inProgress": "En cours",
+      "completed": "Terminées"
+    },
+    "empty": {
+      "pending": "Aucune réservation en attente.",
+      "inProgress": "Aucune réservation en cours.",
+      "completed": "Aucune réservation terminée."
+    },
+    "actions": {
+      "cancel": "Annuler",
+      "downloadPdf": "Télécharger le voucher PDF"
+    },
+    "cancelHint": "Vous pouvez annuler une réservation tant que le transfert n'a pas commencé."
+  },
+  "voucherBanner": {
+    "title": "Voucher disponible pour votre prochain transfert",
+    "description": "Réservation {{code}} — {{from}} → {{to}}. Téléchargez-le pour le présenter lors de votre transfert.",
+    "downloadButton": "Télécharger le voucher"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "subtitle": "Cliquez sur une notification pour accéder à la section concernée.",
+    "markAllRead": "Tout marquer comme lu",
+    "empty": "Aucune notification pour le moment.",
+    "timeAgo": {
+      "now": "à l'instant",
+      "min": "il y a {{count}} min",
+      "hour": "il y a {{count}} h",
+      "day": "il y a {{count}} j"
+    }
+  },
+  "settings": {
+    "title": "Paramètres du compte",
+    "subtitle": "Gérez vos informations personnelles, votre mot de passe et vos préférences.",
+    "sections": {
+      "personalInfo": "Informations personnelles",
+      "changePassword": "Changer le mot de passe",
+      "preferences": "Préférences",
+      "aboutAccount": "À propos de votre compte"
+    },
+    "fields": {
+      "fullName": "Nom complet",
+      "email": "Email",
+      "phone": "Téléphone",
+      "address": "Adresse",
+      "currentPassword": "Mot de passe actuel",
+      "newPassword": "Nouveau mot de passe",
+      "confirmPassword": "Confirmer",
+      "language": "Langue",
+      "theme": "Thème",
+      "userId": "ID utilisateur",
+      "role": "Rôle",
+      "accountStatus": "Statut compte"
+    },
+    "themes": {
+      "system": "Suivre le système",
+      "light": "Clair",
+      "dark": "Sombre"
+    },
+    "passwordMinChars": "Min 8 caractères",
+    "repeatNew": "Répétez le nouveau",
+    "show": "Afficher",
+    "hide": "Masquer",
+    "saveChanges": "Enregistrer les modifications",
+    "changePasswordBtn": "Changer le mot de passe",
+    "savePrefs": "Enregistrer"
+  },
+  "auth": {
+    "alreadyLoggedIn": "Vous êtes déjà connecté en tant que {{name}}. Redirection vers votre espace…",
+    "redirecting": "Redirection vers votre espace…",
+    "loading": "Chargement…"
+  }
+}

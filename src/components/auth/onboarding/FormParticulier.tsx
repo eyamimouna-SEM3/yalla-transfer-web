@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ArrowLeft, ArrowRight, User, Phone, Globe, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, User, Globe, CheckCircle2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { authService } from "@/services/authService";
+import { useAuth } from "@/hooks/useAuth";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -42,13 +43,11 @@ const FieldLabel = ({ children, required }: { children: React.ReactNode; require
 
 const FormParticulier = ({ name, email, password, onBack }: Props) => {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [countryCode, setCountryCode] = useState("+216");
   const [phone, setPhone] = useState("");
   const [country, setCountry] = useState("");
   const [nationality, setNationality] = useState("");
-  const [otpSent, setOtpSent] = useState(false);
-  const [otp, setOtp] = useState("");
-  const [otpVerified, setOtpVerified] = useState(false);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -56,7 +55,7 @@ const FormParticulier = ({ name, email, password, onBack }: Props) => {
   // Validation: Tunisia phone must be exactly 8 digits
   const isPhoneValid = countryCode === "+216" ? /^\d{8}$/.test(phone) : phone.length >= 6;
 
-  const canSubmit = isPhoneValid && country && nationality && otpVerified;
+  const canSubmit = isPhoneValid && country && nationality;
 
   const validateFields = () => {
     const newErrors: Record<string, string> = {};
@@ -66,21 +65,6 @@ const FormParticulier = ({ name, email, password, onBack }: Props) => {
     if (!country) newErrors.country = "Le pays de résidence est obligatoire";
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSendOtp = () => {
-    if (phone.length >= 6) {
-      if (countryCode === "+216" && !/^\d{8}$/.test(phone)) {
-        setErrors({ phone: "Le téléphone tunisien doit contenir 8 chiffres" });
-        return;
-      }
-      setErrors({});
-      setOtpSent(true);
-    }
-  };
-
-  const handleVerifyOtp = () => {
-    if (otp.length >= 4) setOtpVerified(true);
   };
 
   const handleSubmit = async () => {
@@ -100,6 +84,9 @@ const FormParticulier = ({ name, email, password, onBack }: Props) => {
         nationality: nationality,
         country: country,
       });
+      // Met à jour le contexte d'auth pour que l'avatar apparaisse dans le header
+      // et que l'utilisateur reste connecté.
+      await refresh();
       setSuccess(true);
       toast.success("Inscription réussie ! Bienvenue sur Yalla Transfer.");
       setTimeout(() => navigate("/dashboard", { state: { profile: "particulier", name } }), 2000);
@@ -168,7 +155,7 @@ const FormParticulier = ({ name, email, password, onBack }: Props) => {
           {errors.nationality && <p className="text-xs text-destructive mt-1">{errors.nationality}</p>}
         </div>
 
-        {/* Phone with OTP */}
+        {/* Phone */}
         <div>
           <FieldLabel required>Numéro de Téléphone Mobile</FieldLabel>
           <div className="flex gap-2">
@@ -197,51 +184,11 @@ const FormParticulier = ({ name, email, password, onBack }: Props) => {
               }}
               className={cn("h-12 rounded-xl flex-1", errors.phone && "border-destructive")}
             />
-            {!otpSent && (
-              <Button
-                type="button"
-                onClick={handleSendOtp}
-                variant="outline"
-                disabled={phone.length < 6}
-                className="h-12 px-4 rounded-xl border-primary text-primary hover:bg-primary/5 whitespace-nowrap"
-              >
-                Vérifier via WhatsApp
-              </Button>
-            )}
           </div>
-          {errors.phone ? (
+          {errors.phone && (
             <p className="text-xs text-destructive mt-1">{errors.phone}</p>
-          ) : (
-            <p className="text-xs text-muted-foreground mt-1">Un code de vérification sera envoyé via WhatsApp à ce numéro</p>
           )}
         </div>
-
-        {/* OTP input */}
-        {otpSent && !otpVerified && (
-          <div className="bg-primary/5 rounded-xl p-4 border border-primary/20">
-            <FieldLabel required>Code OTP reçu via WhatsApp</FieldLabel>
-            <div className="flex gap-2">
-              <Input
-                placeholder="_ _ _ _"
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                maxLength={6}
-                className="h-12 rounded-xl text-center text-xl tracking-widest font-bold"
-              />
-              <Button onClick={handleVerifyOtp} disabled={otp.length < 4} className="h-12 px-5 rounded-xl">
-                Confirmer
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Code envoyé via WhatsApp à {countryCode} {phone} — <span className="text-primary cursor-pointer hover:underline">Renvoyer</span></p>
-          </div>
-        )}
-
-        {otpVerified && (
-          <div className="flex items-center gap-2 text-sm text-primary bg-secondary rounded-xl px-4 py-3">
-            <CheckCircle2 className="h-4 w-4" />
-            Numéro de téléphone vérifié avec succès ✔
-          </div>
-        )}
 
         {/* Country */}
         <div>

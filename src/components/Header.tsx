@@ -1,14 +1,53 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Menu, X, ChevronDown } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Menu, X, ChevronDown, LayoutDashboard, LogOut } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
 } from "@/components/ui/dropdown-menu";
 import LoginModal from "./LoginModal";
+import { useAuth } from "@/hooks/useAuth";
+import { useLocale } from "@/hooks/useLocale";
+
+// Calcule les initiales (2 lettres max) pour l'avatar fallback.
+const getInitials = (name?: string, email?: string) => {
+  const base = name?.trim() || email?.trim() || "?";
+  return base
+    .split(/\s+/)
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+};
+
+// Détermine la route du dashboard selon le rôle de l'utilisateur.
+const dashboardPath = (role?: string) => {
+  if (role === "admin") return "/admin";
+  return "/dashboard";
+};
+
+// Les libellés sont maintenant traduits via t() — voir dashboardLabel/roleLabel
+// dans le composant Header qui utilise useLocale().
+
+// Construit le state à passer au dashboard pour qu'il affiche le bon profil.
+// Note : driver_employee n'existe que côté mobile, pas traité ici.
+const dashboardState = (
+  role?: string,
+  name?: string,
+): { profile: string; name: string } | undefined => {
+  if (role === "admin") return undefined;
+  let profile = "particulier";
+  if (role === "client_b2b" || role === "client_company") profile = "corporate";
+  else if (role === "supplier") profile = "transport";
+  else if (role === "driver_independent") profile = "chauffeur";
+  return { profile, name: name || "Utilisateur" };
+};
 
 const currencies = [
   { code: "EUR", symbol: "€", label: "" },
@@ -22,21 +61,127 @@ const languages = [
   { code: "ES", label: "", flag: "🇪🇸" },
 ];
 
+// Libellés traduits — utilisés par renderAvatarMenu et le dropdown.
+const roleLabelKey = (role?: string): string => {
+  switch (role) {
+    case "admin": return "roles.admin";
+    case "supplier": return "roles.supplier";
+    case "driver_independent": return "roles.driver_independent";
+    case "client_b2b":
+    case "client_company": return "roles.client_b2b";
+    case "client_b2c":
+    case "client": return "roles.client_b2c";
+    default: return "roles.user";
+  }
+};
+
 const Header = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [lang, setLang] = useState("FR");
   const [currency, setCurrency] = useState("EUR");
   const [loginOpen, setLoginOpen] = useState(false);
+  const { user, loading: authLoading, signOut } = useAuth();
+  const { locale, setLocale, t } = useLocale();
+  const navigate = useNavigate();
+
+  // Synchronise le sélecteur de langue du header avec i18next
+  const lang = locale.toUpperCase();
+  const setLang = (next: string) => setLocale(next.toLowerCase() as "fr" | "en" | "es");
 
   const navItems = [
-    { label: "À propos", href: "/#apropos" },
-    { label: "Notre App", href: "/app" },
-    { label: "Nos partenaires", href: "/#partenaires" },
-    { label: "Contact", href: "/contact" },
+    { label: t("header.about"), href: "/#apropos" },
+    { label: t("header.ourApp"), href: "/app" },
+    { label: t("header.partners"), href: "/#partenaires" },
+    { label: t("header.contact"), href: "/contact" },
   ];
 
   const currentCurrency = currencies.find((c) => c.code === currency)!;
   const currentLang = languages.find((l) => l.code === lang)!;
+
+  const displayName = user?.fullName || user?.full_name || user?.email || "";
+  const userInitials = getInitials(displayName, user?.email);
+  const userAvatarUrl = user?.avatar_url;
+
+  const handleGoToDashboard = () => {
+    if (!user) return;
+    const path = dashboardPath(user.role);
+    const state = dashboardState(user.role, displayName);
+    navigate(path, state ? { state } : undefined);
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate("/");
+  };
+
+  // Rendu de l'avatar dropdown — réutilisé desktop + mobile.
+  const renderAvatarMenu = (compact: boolean = false) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          className={`relative ${compact ? "h-9 w-9" : "h-10 w-10"} rounded-full bg-primary/10 hover:bg-primary/20 transition-all duration-200 overflow-hidden border-2 border-primary/30 hover:border-primary focus:outline-none focus:ring-2 focus:ring-primary/40 flex items-center justify-center`}
+          aria-label="Menu utilisateur"
+        >
+          {userAvatarUrl ? (
+            <img
+              src={userAvatarUrl}
+              alt={displayName}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="text-primary font-bold text-sm">
+              {userInitials}
+            </span>
+          )}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="min-w-[240px] rounded-xl shadow-lg border-border/60 mt-2"
+      >
+        <DropdownMenuLabel>
+          <div className="flex items-center gap-3 py-1">
+            <div className="h-10 w-10 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center overflow-hidden shrink-0">
+              {userAvatarUrl ? (
+                <img
+                  src={userAvatarUrl}
+                  alt={displayName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <span className="text-primary font-bold text-sm">
+                  {userInitials}
+                </span>
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold text-sm text-foreground truncate">
+                {displayName || "Utilisateur"}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {t(roleLabelKey(user?.role))}
+              </p>
+            </div>
+          </div>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={handleGoToDashboard}
+          className="cursor-pointer rounded-lg gap-2 py-2.5"
+        >
+          <LayoutDashboard className="h-4 w-4 text-primary" />
+          <span>{t("header.myDashboard")}</span>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onClick={handleSignOut}
+          className="cursor-pointer rounded-lg gap-2 py-2.5 text-destructive focus:text-destructive focus:bg-destructive/10"
+        >
+          <LogOut className="h-4 w-4" />
+          <span>{t("common.logout")}</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 
   return (
     <>
@@ -113,18 +258,45 @@ const Header = () => {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <Button
-              variant="outline"
-              size="sm"
-              className="rounded-full border-primary/60 text-primary hover:bg-primary hover:text-primary-foreground transition-all duration-200"
-              onClick={() => setLoginOpen(true)}
-            >
-              Connexion
-            </Button>
-            <Button size="sm" className="rounded-full shadow-button bg-accent hover:bg-accent/90 text-accent-foreground transition-all duration-200" asChild>
-              <Link to="/inscription">S'inscrire</Link>
-            </Button>
+            {authLoading ? (
+              // Pendant la restauration de session (au boot), on évite de
+              // flasher les boutons Connexion/S'inscrire alors que l'utilisateur
+              // est en réalité connecté. Skeleton circulaire à la place de
+              // l'avatar.
+              <div
+                className="h-10 w-10 rounded-full bg-muted animate-pulse"
+                aria-label="Chargement de votre session"
+              />
+            ) : user ? (
+              renderAvatarMenu()
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full border-primary/60 text-primary hover:bg-primary hover:text-primary-foreground transition-all duration-200"
+                  onClick={() => setLoginOpen(true)}
+                >
+                  {t("header.login")}
+                </Button>
+                <Button size="sm" className="rounded-full shadow-button bg-accent hover:bg-accent/90 text-accent-foreground transition-all duration-200" asChild>
+                  <Link to="/inscription">{t("header.register")}</Link>
+                </Button>
+              </>
+            )}
           </div>
+
+          {/* Mobile : avatar visible si connecté, à côté du toggle.
+              Pendant authLoading, skeleton compact pour éviter le flash. */}
+          {authLoading ? (
+            <div className="lg:hidden flex items-center mr-2">
+              <div className="h-9 w-9 rounded-full bg-muted animate-pulse" />
+            </div>
+          ) : user ? (
+            <div className="lg:hidden flex items-center mr-2">
+              {renderAvatarMenu(true)}
+            </div>
+          ) : null}
 
           {/* Mobile toggle */}
           <button className="lg:hidden p-2 hover:bg-muted rounded-lg transition-colors" onClick={() => setMobileOpen(!mobileOpen)}>
@@ -181,19 +353,52 @@ const Header = () => {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="flex-1 rounded-full border-primary text-primary"
-                onClick={() => { setMobileOpen(false); setLoginOpen(true); }}
-              >
-                Connexion
-              </Button>
-              <Button size="sm" className="flex-1 rounded-full shadow-button bg-accent text-accent-foreground" asChild>
-                <Link to="/inscription" onClick={() => setMobileOpen(false)}>S'inscrire</Link>
-              </Button>
-            </div>
+            {authLoading ? (
+              // Skeleton placeholder pendant la restauration de session pour
+              // éviter le flash "non connecté".
+              <div className="h-10 rounded-full bg-muted animate-pulse" />
+            ) : user ? (
+              <div className="flex flex-col gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full gap-2 justify-start"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    handleGoToDashboard();
+                  }}
+                >
+                  <LayoutDashboard className="h-4 w-4" />
+                  {t("header.myDashboard")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-full gap-2 justify-start text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    handleSignOut();
+                  }}
+                >
+                  <LogOut className="h-4 w-4" />
+                  {t("common.logout")}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 rounded-full border-primary text-primary"
+                  onClick={() => { setMobileOpen(false); setLoginOpen(true); }}
+                >
+                  {t("header.login")}
+                </Button>
+                <Button size="sm" className="flex-1 rounded-full shadow-button bg-accent text-accent-foreground" asChild>
+                  <Link to="/inscription" onClick={() => setMobileOpen(false)}>{t("header.register")}</Link>
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </header>

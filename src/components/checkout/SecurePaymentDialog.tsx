@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,18 @@ interface SecurePaymentDialogProps {
   /** Reçoit l'email saisi pour que le booking soit créé avec et reçoive le voucher par email. */
   onSuccess: (verifiedEmail: string) => void;
   transferDate?: Date;
+  /**
+   * Données pré-saisies dans CheckoutPage. Si fournies, le dialog initialise
+   * son état avec ces valeurs (pas besoin de retaper) et passe directement
+   * à l'envoi du code OTP par email à l'ouverture.
+   */
+  prefilledData?: {
+    holder?: string;
+    cardNumber?: string;
+    expiry?: string; // format MM/AA
+    cvv?: string;
+    email?: string;
+  };
 }
 
 const methodLabels: Record<PaymentMethodKind, string> = {
@@ -45,10 +57,15 @@ const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 12 }, (_, i) => String(currentYear + i));
 
 const SecurePaymentDialog = ({
-  open, onOpenChange, method, amount, currency = "DT", onSuccess, transferDate,
+  open, onOpenChange, method, amount, currency = "DT", onSuccess, transferDate, prefilledData,
 }: SecurePaymentDialogProps) => {
   const [phase, setPhase] = useState<Phase>("form");
   const [otp, setOtp] = useState("");
+  // Empêche la boucle infinie d'auto-trigger quand le SMTP échoue.
+  // Une fois qu'on a tenté l'envoi, on ne réessaie plus tant que l'utilisateur
+  // ne clique pas explicitement sur "Réessayer".
+  const autoPayAttemptedRef = useRef(false);
+  const [autoPayError, setAutoPayError] = useState<string | null>(null);
 
   // Card-like fields (also used for E-Dinar)
   const [cardNumber, setCardNumber] = useState("");
@@ -74,8 +91,28 @@ const SecurePaymentDialog = ({
       setPhase("form");
       setOtp("");
       setIban("");
+      // Reset du verrou anti-boucle à chaque ouverture du dialog.
+      autoPayAttemptedRef.current = false;
+      setAutoPayError(null);
+      // Pré-remplit les champs si CheckoutPage a déjà collecté les données
+      // pour éviter la double saisie.
+      if (prefilledData) {
+        if (prefilledData.holder !== undefined) setHolder(prefilledData.holder);
+        if (prefilledData.cardNumber !== undefined) setCardNumber(prefilledData.cardNumber);
+        if (prefilledData.cvv !== undefined) setCvv(prefilledData.cvv);
+        if (prefilledData.email !== undefined) setEmail(prefilledData.email);
+        // Décompose MM/AA en mois + année (année sur 4 chiffres)
+        if (prefilledData.expiry) {
+          const m = prefilledData.expiry.match(/^(\d{1,2})\s*\/\s*(\d{2,4})$/);
+          if (m) {
+            setMonth(m[1].padStart(2, "0"));
+            const yy = m[2];
+            setYear(yy.length === 2 ? `20${yy}` : yy);
+          }
+        }
+      }
     }
-  }, [open, method]);
+  }, [open, method, prefilledData]);
 
   const formatCardNumber = (v: string) =>
     v.replace(/\D/g, "").slice(0, 16).replace(/(\d{4})(?=\d)/g, "$1 ");
@@ -93,6 +130,14 @@ const SecurePaymentDialog = ({
       });
     }
     if (isWallet) {
+      // En mode "prefilled" (données déjà saisies dans CheckoutPage), seul
+      // l'email suffit — la sécurité repose sur l'OTP email, pas sur le PIN
+      // wallet (qui est purement décoratif dans cette simulation).
+      if (prefilledData?.email) {
+        return validateAll({
+          email: () => validators.email(email),
+        });
+      }
       return validateAll({
         email: () => validators.email(email),
         holder: () => validators.fullName(holder),
@@ -142,6 +187,38 @@ const SecurePaymentDialog = ({
         variant: "destructive",
       });
     }
+  };
+
+  // Quand des données sont pré-remplies et que tout est valide, on envoie
+  // automatiquement le code OTP : pas de saisie supplémentaire à faire.
+  // Verrou anti-boucle : on ne tente qu'une seule fois par ouverture du dialog.
+  useEffect(() => {
+    if (!open || !prefilledData || phase !== "form") return;
+    if (Object.keys(fieldErrors).length !== 0) return;
+    if (autoPayAttemptedRef.current) return;
+    autoPayAttemptedRef.current = true;
+    (async () => {
+      try {
+        await sendVerificationCode(email.trim().toLowerCase());
+        setPhase("otp");
+        toast({
+          title: "Code envoyé",
+          description: `Un code à 6 chiffres a été envoyé à ${email}.`,
+        });
+      } catch (err) {
+        const e = err as { message?: string; status?: number };
+        setAutoPayError(
+          e?.message ??
+            "Impossible d'envoyer le code de vérification. Réessayez ou changez d'email.",
+        );
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prefilledData, fieldErrors, phase]);
+
+  const retryAutoPay = () => {
+    setAutoPayError(null);
+    autoPayAttemptedRef.current = false;
   };
 
   const handleVerifyOtp = async () => {
@@ -203,7 +280,50 @@ const SecurePaymentDialog = ({
           </DialogDescription>
         </DialogHeader>
 
-        {phase === "form" && (
+        {/* Quand des données sont pré-remplies depuis CheckoutPage, on affiche
+            soit un loader pendant l'envoi, soit un message d'erreur avec retry
+            si l'envoi a échoué. L'utilisateur ne revoit jamais les champs. */}
+        {phase === "form" && prefilledData && !autoPayError && (
+          <div className="flex flex-col items-center justify-center py-10 gap-3 text-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm font-medium text-foreground">
+              Préparation du paiement…
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Envoi du code de vérification à <span className="font-medium text-foreground">{email}</span>
+            </p>
+          </div>
+        )}
+
+        {phase === "form" && prefilledData && autoPayError && (
+          <div className="flex flex-col items-center justify-center py-8 gap-4 text-center">
+            <div className="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center">
+              <AlertCircle className="h-6 w-6 text-destructive" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-foreground">
+                Envoi du code impossible
+              </p>
+              <p className="text-xs text-muted-foreground max-w-xs">
+                {autoPayError}
+              </p>
+            </div>
+            <div className="flex gap-2 w-full max-w-xs">
+              <Button
+                variant="outline"
+                className="flex-1"
+                onClick={() => onOpenChange(false)}
+              >
+                Fermer
+              </Button>
+              <Button className="flex-1" onClick={retryAutoPay}>
+                Réessayer
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {phase === "form" && !prefilledData && (
           <div className="space-y-3 pt-1">
             {isCardLike && (
               <>

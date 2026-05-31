@@ -4,6 +4,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
+import { ThemeProvider } from "@/hooks/useTheme";
+import { LocaleSync } from "@/hooks/useLocale";
 import ScrollToTop from "./components/ScrollToTop";
 import Index from "./pages/Index";
 import AuthPage from "./pages/AuthPage";
@@ -21,7 +23,7 @@ import AdminReservations from "./pages/admin/AdminReservations";
 import AdminPayments from "./pages/admin/AdminPayments";
 import AdminReporting from "./pages/admin/AdminReporting";
 import AdminNotifications from "./pages/admin/AdminNotifications";
-import AdminOffers from "./pages/admin/AdminOffers";
+import AdminSettings from "./pages/admin/AdminSettings";
 import AdminRouteGuard from "./components/admin/AdminRouteGuard";
 import NotFound from "./pages/NotFound";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -34,10 +36,17 @@ const App = () => (
       <TooltipProvider>
         <Toaster />
         <Sonner />
-        <BrowserRouter>
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
           <AuthProvider>
-            <ScrollToTop />
-            <Routes>
+            <ThemeProvider>
+              <LocaleSync />
+              <ScrollToTop />
+              <Routes>
               <Route path="/" element={<Index />} />
               <Route path="/contact" element={<ContactPage />} />
               <Route path="/inscription" element={<AuthPage />} />
@@ -50,13 +59,13 @@ const App = () => (
               <Route path="/admin" element={<AdminRouteGuard><AdminDashboard /></AdminRouteGuard>} />
               <Route path="/admin/users" element={<AdminRouteGuard><AdminUsers /></AdminRouteGuard>} />
               <Route path="/admin/reservations" element={<AdminRouteGuard><AdminReservations /></AdminRouteGuard>} />
-              <Route path="/admin/offers" element={<AdminRouteGuard><AdminOffers /></AdminRouteGuard>} />
-
               <Route path="/admin/payments" element={<AdminRouteGuard><AdminPayments /></AdminRouteGuard>} />
               <Route path="/admin/reporting" element={<AdminRouteGuard><AdminReporting /></AdminRouteGuard>} />
               <Route path="/admin/notifications" element={<AdminRouteGuard><AdminNotifications /></AdminRouteGuard>} />
+              <Route path="/admin/settings" element={<AdminRouteGuard><AdminSettings /></AdminRouteGuard>} />
               <Route path="*" element={<NotFound />} />
             </Routes>
+            </ThemeProvider>
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

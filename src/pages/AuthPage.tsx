@@ -9,6 +9,8 @@ import StepPassword from "@/components/auth/StepPassword";
 import StepSuccess from "@/components/auth/StepSuccess";
 import StepProfileForm from "@/components/auth/StepProfileForm";
 import StepClientTypeSelection from "@/components/auth/StepClientTypeSelection";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "@/hooks/use-toast";
 
 export type ProfileType = "particulier" | "corporate" | "transport" | "chauffeur" | null;
 
@@ -17,6 +19,7 @@ const VALID_PROFILES: ProfileType[] = ["particulier", "corporate", "transport", 
 const AuthPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { user, loading } = useAuth();
   const [step, setStep] = useState(1);
   const [profile, setProfile] = useState<ProfileType>(null);
   const [email, setEmail] = useState("");
@@ -26,6 +29,22 @@ const AuthPage = () => {
   // Mode "quickfinalize" : après une réservation, on demande seulement
   // le mot de passe puis le type de client (particulier / corporate).
   const [quickFinalize, setQuickFinalize] = useState(false);
+
+  // Si l'utilisateur est déjà connecté, on le redirige automatiquement vers
+  // son dashboard. Inutile de lui demander de recréer un compte — y compris
+  // pour le mode "quickfinalize" qui est conçu uniquement pour les invités
+  // ayant réservé sans compte.
+  useEffect(() => {
+    if (loading) return;
+    if (user) {
+      toast({
+        title: "Déjà connecté",
+        description: `Vous êtes déjà connecté en tant que ${user.fullName || user.email}. Redirection vers votre espace…`,
+      });
+      const path = user.role === "admin" ? "/admin" : "/dashboard";
+      navigate(path, { replace: true });
+    }
+  }, [user, loading, navigate]);
 
   useEffect(() => {
     const finalize = searchParams.get("finalize") as ProfileType | null;
@@ -56,11 +75,18 @@ const AuthPage = () => {
   const handleIdentification = (n: string, e: string) => {
     setName(n);
     setEmail(e);
+    // Flow : Identification → Password (step 3) → EmailVerification (step 4) → Success (step 5)
     setStep(3);
   };
 
   const handlePasswordComplete = (pwd: string) => {
     setPassword(pwd);
+    // Une fois le mot de passe défini, on envoie le code de vérification email.
+    setStep(4);
+  };
+
+  const handleEmailVerified = () => {
+    // Email vérifié → succès puis formulaire spécifique au profil.
     setStep(5);
   };
 
@@ -92,6 +118,25 @@ const AuthPage = () => {
     animate: { opacity: 1, y: 0, transition: { duration: 0.4, ease: [0.25, 0.1, 0.25, 1] as const } },
     exit: { opacity: 0, y: -16, transition: { duration: 0.25 } },
   };
+
+  // Pendant le chargement initial ou si l'utilisateur est déjà connecté
+  // (et qu'on est en train de le rediriger), on affiche un spinner au lieu
+  // du formulaire d'inscription pour éviter le "flash" visuel.
+  const isRedirectingLoggedIn = !loading && user;
+  if (loading || isRedirectingLoggedIn) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5 flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mx-auto" />
+          <p className="text-sm text-muted-foreground">
+            {isRedirectingLoggedIn
+              ? "Redirection vers votre espace…"
+              : "Chargement…"}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-primary/5 via-background to-accent/5">
@@ -155,12 +200,16 @@ const AuthPage = () => {
             )}
             {!quickFinalize && step === 3 && (
               <motion.div key="step3" {...pageVariants}>
-                <StepEmailSent email={email} onContinue={() => setStep(4)} />
+                <StepPassword
+                  email={email}
+                  onBack={() => setStep(2)}
+                  onCompleteWithPassword={handlePasswordComplete}
+                />
               </motion.div>
             )}
             {!quickFinalize && step === 4 && (
               <motion.div key="step4" {...pageVariants}>
-                <StepPassword email={email} onBack={() => setStep(3)} onCompleteWithPassword={handlePasswordComplete} />
+                <StepEmailSent email={email} onContinue={handleEmailVerified} />
               </motion.div>
             )}
             {!quickFinalize && step === 5 && (

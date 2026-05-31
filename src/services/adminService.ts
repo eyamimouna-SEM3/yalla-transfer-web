@@ -24,6 +24,122 @@ export interface AdminUser {
   createdAt: string;
 }
 
+export interface AdminUserDetails extends AdminUser {
+  isVerified?: boolean;
+  avatarUrl?: string | null;
+  avatarId?: string | null;
+  clientKind?: string | null;
+  locale?: string | null;
+  themeMode?: string | null;
+  googleId?: string | null;
+  appleId?: string | null;
+  updatedAt?: string;
+
+  // Particulier
+  nationality?: string | null;
+  country?: string | null;
+
+  // Corporate / B2B
+  taxId?: string | null;
+  matriculeFiscal?: string | null;
+  activityType?: string | null;
+  address?: string | null;
+  website?: string | null;
+  responsibleName?: string | null;
+  responsibleEmail?: string | null;
+  responsiblePhone?: string | null;
+
+  // Supplier
+  fleetSize?: number | null;
+  is247?: boolean | null;
+  rib?: string | null;
+  operationalZones?: string[] | null;
+  vehicleTypes?: string[] | null;
+  commerceRegister?: string | null;
+  patent?: string | null;
+  civilLiabilityInsurance?: string | null;
+
+  // Driver
+  employerSupplier?: {
+    id: string;
+    fullName: string;
+    companyName?: string | null;
+  } | null;
+  licenseNumber?: string | null;
+  permitNumber?: string | null;
+  professionalCardNumber?: string | null;
+  city?: string | null;
+  languages?: string[] | null;
+  experienceYears?: string | null;
+
+  // KYC docs
+  driverLicenseFront?: string | null;
+  driverLicenseBack?: string | null;
+  vehicleRegistrationFront?: string | null;
+  vehicleRegistrationBack?: string | null;
+  insuranceDocument?: string | null;
+  insuranceNumber?: string | null;
+  insuranceDateObtained?: string | null;
+  insuranceDateExpiration?: string | null;
+  patentDocument?: string | null;
+
+  // Véhicule
+  vehicleType?: string | null;
+  vehicleBrand?: string | null;
+  vehicleModel?: string | null;
+  vehicleRegistration?: string | null;
+  vehicleYear?: number | null;
+  vehicleColor?: string | null;
+  vehicleCapacity?: number | null;
+  vehicleLuggageLarge?: number | null;
+  vehicleLuggageSmall?: number | null;
+  vehiclePhotoFront?: string | null;
+  vehiclePhotoBack?: string | null;
+  vehiclePhotoInterior?: string | null;
+
+  // Stats
+  stats?: {
+    client?: {
+      bookingsTotal: number;
+      bookingsByStatus: Record<string, number>;
+      totalSpent: number;
+      lastBooking?: {
+        id: string;
+        code: string;
+        departure: string;
+        destination: string;
+        departureAt: string;
+        status: string;
+        totalPrice: number;
+      } | null;
+    } | null;
+    driver?: {
+      tripsTotal: number;
+      tripsCompleted: number;
+      averageRating: number | null;
+      ratingsCount: number;
+      lastTrip?: {
+        id: string;
+        code: string;
+        departure: string;
+        destination: string;
+        departureAt: string;
+        status: string;
+      } | null;
+    } | null;
+    supplier?: {
+      vehiclesCount: number;
+      driversCount: number;
+      handledBookings: number;
+      completedBookings: number;
+      offersTotal: number;
+      offersAccepted: number;
+      averageRating: number | null;
+      ratingsCount: number;
+    } | null;
+  };
+}
+
 export interface AdminBooking extends Booking {
   client?: { id: string; fullName: string; email?: string; phone?: string };
   assignedDriver?: {
@@ -54,6 +170,39 @@ export const adminService = {
     return api.get<AdminUser[]>("/admin/users", { params: filters });
   },
 
+  async getUserDetails(id: string): Promise<AdminUserDetails> {
+    return api.get<AdminUserDetails>(`/admin/users/${id}`);
+  },
+
+  /**
+   * Télécharge l'archive ZIP contenant tous les documents KYC de l'utilisateur
+   * (permis, carte grise, assurance, patente, photos véhicule…) + un fichier
+   * index.txt récapitulatif. Le navigateur enregistre directement le ZIP via
+   * un lien temporaire object URL.
+   */
+  async downloadUserDocuments(id: string, suggestedName?: string): Promise<void> {
+    const token =
+      sessionStorage.getItem("yalla_transfer_token") ??
+      localStorage.getItem("yalla_transfer_token") ??
+      "";
+    const res = await fetch(`/api/admin/users/${id}/documents.zip`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = suggestedName ?? `documents_${id.slice(0, 8)}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
+
   async updateUser(
     id: string,
     data: {
@@ -64,6 +213,10 @@ export const adminService = {
     },
   ): Promise<AdminUser> {
     return api.patch<AdminUser>(`/admin/users/${id}`, data);
+  },
+
+  async deleteUser(id: string): Promise<{ id: string; deleted: true }> {
+    return api.delete<{ id: string; deleted: true }>(`/admin/users/${id}`);
   },
 
   async getBookings(status?: string): Promise<AdminBooking[]> {
@@ -108,36 +261,25 @@ export const adminService = {
     return api.post<{ count: number; message: string }>("/admin/notifications/broadcast", payload);
   },
 
-  async getBookingOffers(): Promise<AdminBookingOffer[]> {
-    return api.get<AdminBookingOffer[]>("/admin/booking-offers");
+  async getSettings(): Promise<AdminSetting[]> {
+    return api.get<AdminSetting[]>("/admin/settings");
+  },
+
+  async updateSettings(
+    payload: Record<string, string | number | boolean>,
+  ): Promise<{ updated: string[]; count: number }> {
+    return api.patch<{ updated: string[]; count: number }>("/admin/settings", payload);
   },
 };
 
-export interface AdminBookingOffer {
-  id: string;
-  bookingId: string;
-  supplierId: string;
-  driverId: string | null;
-  vehicleId: string | null;
-  price: number;
-  notes: string | null;
-  status: "pending" | "accepted" | "rejected" | "expired" | "withdrawn";
-  expiresAt: string | null;
-  createdAt: string;
-  booking: {
-    id: string;
-    code: string;
-    departure: string;
-    destination: string;
-    departureAt: string;
-    passengers: number;
-    status: string;
-    clientId: string;
-    client?: { id: string; fullName: string; email?: string };
-  };
-  supplier: { id: string; fullName: string; companyName?: string };
-  driver?: { id: string; fullName: string } | null;
-  vehicle?: { id: string; type: string; category: string } | null;
+export interface AdminSetting {
+  key: string;
+  category: string;
+  label: string;
+  type: "text" | "number" | "boolean" | "select";
+  options?: string[] | null;
+  value: string | number | boolean;
+  updatedAt: string;
 }
 
 export interface AdminNotification {

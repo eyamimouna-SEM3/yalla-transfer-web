@@ -1,0 +1,186 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete",
+    "edit": "Edit",
+    "confirm": "Confirm",
+    "loading": "Loading…",
+    "search": "Search…",
+    "back": "Back",
+    "next": "Continue",
+    "yes": "Yes",
+    "no": "No",
+    "all": "All",
+    "actions": "Actions",
+    "status": "Status",
+    "date": "Date",
+    "time": "Time",
+    "amount": "Amount",
+    "details": "Details",
+    "view": "View",
+    "download": "Download",
+    "send": "Send",
+    "logout": "Sign out",
+    "settings": "Settings",
+    "notifications": "Notifications",
+    "welcome": "Welcome",
+    "tryAgain": "Try again",
+    "error": "Error",
+    "success": "Success",
+    "required": "Required",
+    "optional": "Optional",
+    "noData": "No data",
+    "total": "Total",
+    "searchPlaceholder": "Search..."
+  },
+  "table": {
+    "id": "ID",
+    "date": "Date",
+    "time": "Time",
+    "trip": "Trip",
+    "vehicle": "Vehicle",
+    "price": "Price",
+    "status": "Status",
+    "actions": "Actions",
+    "code": "Code",
+    "amount": "Amount",
+    "period": "Period",
+    "paymentStatus": "Payment status"
+  },
+  "bookingStatus": {
+    "pending": "Awaiting supplier",
+    "confirmed": "Confirmed",
+    "assigned": "Driver assigned",
+    "driver_en_route": "Driver en route",
+    "arrived": "Driver arrived",
+    "in_progress": "In progress",
+    "ongoing": "In progress",
+    "completed": "Completed",
+    "cancelled": "Cancelled"
+  },
+  "paymentStatus": {
+    "paid": "Paid",
+    "pending": "Pending",
+    "refunded": "Refunded",
+    "failed": "Failed"
+  },
+  "payments": {
+    "title": "Payment history",
+    "subtitle": "All your payments with the details of each transaction.",
+    "empty": "No payment recorded.",
+    "bookingId": "Booking ID",
+    "amountPaid": "Amount paid",
+    "paymentMethod": "Payment method",
+    "receipt": "Receipt"
+  },
+  "header": {
+    "about": "About",
+    "ourApp": "Our App",
+    "partners": "Our partners",
+    "contact": "Contact",
+    "login": "Sign in",
+    "register": "Sign up",
+    "myDashboard": "Go to my dashboard"
+  },
+  "roles": {
+    "admin": "Administrator",
+    "supplier": "Transport company",
+    "driver_independent": "Independent driver",
+    "client_b2b": "Corporate client",
+    "client_b2c": "Individual client",
+    "user": "User"
+  },
+  "dashboard": {
+    "welcome": "Welcome, {{name}}",
+    "subtitle": "Your personal area to manage your bookings and payments easily.",
+    "myReservations": "My bookings",
+    "paymentsHistory": "Payment history",
+    "monthlyInvoices": "Monthly billing",
+    "vehicleManagement": "Vehicle management",
+    "driverManagement": "Driver management",
+    "reservationsList": "Bookings list",
+    "revenue": "Revenue",
+    "revenueAndStats": "Revenue & statistics",
+    "ratings": "Ratings",
+    "qualityRatings": "Quality & reviews",
+    "totalTransfers": "Total transfers",
+    "completedTransfers": "Completed transfers",
+    "totalBilled": "Total billed",
+    "newReservation": "New booking",
+    "tabs": {
+      "pending": "Pending",
+      "inProgress": "In progress",
+      "completed": "Completed"
+    },
+    "empty": {
+      "pending": "No pending booking.",
+      "inProgress": "No booking in progress.",
+      "completed": "No completed booking."
+    },
+    "actions": {
+      "cancel": "Cancel",
+      "downloadPdf": "Download PDF voucher"
+    },
+    "cancelHint": "You can cancel a booking as long as the transfer hasn't started."
+  },
+  "voucherBanner": {
+    "title": "Voucher available for your next transfer",
+    "description": "Booking {{code}} — {{from}} → {{to}}. Download it to present during your transfer.",
+    "downloadButton": "Download voucher"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "subtitle": "Click on a notification to access the related section.",
+    "markAllRead": "Mark all as read",
+    "empty": "No notifications yet.",
+    "timeAgo": {
+      "now": "just now",
+      "min": "{{count}} min ago",
+      "hour": "{{count}} h ago",
+      "day": "{{count}} d ago"
+    }
+  },
+  "settings": {
+    "title": "Account settings",
+    "subtitle": "Manage your personal information, password and preferences.",
+    "sections": {
+      "personalInfo": "Personal information",
+      "changePassword": "Change password",
+      "preferences": "Preferences",
+      "aboutAccount": "About your account"
+    },
+    "fields": {
+      "fullName": "Full name",
+      "email": "Email",
+      "phone": "Phone",
+      "address": "Address",
+      "currentPassword": "Current password",
+      "newPassword": "New password",
+      "confirmPassword": "Confirm",
+      "language": "Language",
+      "theme": "Theme",
+      "userId": "User ID",
+      "role": "Role",
+      "accountStatus": "Account status"
+    },
+    "themes": {
+      "system": "Follow system",
+      "light": "Light",
+      "dark": "Dark"
+    },
+    "passwordMinChars": "Min 8 characters",
+    "repeatNew": "Repeat the new one",
+    "show": "Show",
+    "hide": "Hide",
+    "saveChanges": "Save changes",
+    "changePasswordBtn": "Change password",
+    "savePrefs": "Save"
+  },
+  "auth": {
+    "alreadyLoggedIn": "You are already signed in as {{name}}. Redirecting to your area…",
+    "redirecting": "Redirecting to your area…",
+    "loading": "Loading…"
+  }
+}
